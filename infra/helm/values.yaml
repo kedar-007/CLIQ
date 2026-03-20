@@ -1,0 +1,259 @@
+global:
+  imageRegistry: ""
+  imageTag: "latest"
+  imagePullPolicy: IfNotPresent
+  storageClass: "gp2"
+  env: production
+
+# Service configurations
+services:
+  auth:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: comms/auth-service
+      tag: ""
+    service:
+      port: 3001
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    env: {}
+
+  chat:
+    enabled: true
+    replicaCount: 3
+    image:
+      repository: comms/chat-service
+      tag: ""
+    service:
+      port: 3002
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+      requests:
+        cpu: 200m
+        memory: 256Mi
+    env: {}
+
+  call:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: comms/call-service
+      tag: ""
+    service:
+      port: 3003
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    env: {}
+
+  notification:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: comms/notification-service
+      tag: ""
+    service:
+      port: 3004
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    env: {}
+
+  file:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: comms/file-service
+      tag: ""
+    service:
+      port: 3005
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    env: {}
+
+  search:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: comms/search-service
+      tag: ""
+    service:
+      port: 3006
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    env: {}
+
+  calendar:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: comms/calendar-service
+      tag: ""
+    service:
+      port: 3007
+    resources:
+      limits:
+        cpu: 300m
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+    env: {}
+
+  task:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: comms/task-service
+      tag: ""
+    service:
+      port: 3008
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    env: {}
+
+  bot:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: comms/bot-service
+      tag: ""
+    service:
+      port: 3009
+    resources:
+      limits:
+        cpu: 300m
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+    env: {}
+
+  integration:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: comms/integration-service
+      tag: ""
+    service:
+      port: 3010
+    resources:
+      limits:
+        cpu: 300m
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+    env: {}
+
+  ai:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: comms/ai-service
+      tag: ""
+    service:
+      port: 3011
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    env: {}
+
+  analytics:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: comms/analytics-service
+      tag: ""
+    service:
+      port: 3012
+    resources:
+      limits:
+        cpu: 300m
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+    env: {}
+
+  billing:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: comms/billing-service
+      tag: ""
+    service:
+      port: 3013
+    resources:
+      limits:
+        cpu: 300m
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+    env: {}
+
+ingress:
+  enabled: true
+  className: nginx
+  host: api.dsvcliq.com
+  tls:
+    enabled: true
+    secretName: comms-tls
+
+# Shared environment (from secrets/configmap)
+sharedEnvFrom:
+  - secretRef:
+      name: comms-secrets
+  - configMapRef:
+      name: comms-config
+
+# PostgreSQL (disable if using external RDS)
+postgresql:
+  enabled: false
+  auth:
+    database: comms
+    username: comms
+    password: changeme
+
+# Redis (disable if using external ElastiCache)
+redis:
+  enabled: false
+  auth:
+    enabled: true
+    password: changeme

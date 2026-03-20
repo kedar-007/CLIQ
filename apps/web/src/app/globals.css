@@ -1,0 +1,181 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 224 71.4% 4.1%;
+    --card: 0 0% 100%;
+    --card-foreground: 224 71.4% 4.1%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 71.4% 4.1%;
+    --primary: 262.1 83.3% 57.8%;
+    --primary-foreground: 210 20% 98%;
+    --secondary: 220 14.3% 95.9%;
+    --secondary-foreground: 220.9 39.3% 11%;
+    --muted: 220 14.3% 95.9%;
+    --muted-foreground: 220 8.9% 46.1%;
+    --accent: 220 14.3% 95.9%;
+    --accent-foreground: 220.9 39.3% 11%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 20% 98%;
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 262.1 83.3% 57.8%;
+    --radius: 0.5rem;
+
+    /* Sidebar - dark purple like Teams */
+    --sidebar-background: 246 53% 17%;
+    --sidebar-foreground: 240 10% 90%;
+    --sidebar-primary: 262.1 83.3% 65%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 246 40% 23%;
+    --sidebar-accent-foreground: 240 10% 95%;
+    --sidebar-border: 246 40% 22%;
+    --sidebar-ring: 262.1 83.3% 57.8%;
+
+    /* Nav rail - darker */
+    --nav-background: 246 62% 12%;
+    --nav-foreground: 240 10% 75%;
+    --nav-active: 262.1 83.3% 65%;
+  }
+
+  .dark {
+    --background: 224 71.4% 4.1%;
+    --foreground: 210 20% 98%;
+    --card: 224 71.4% 4.1%;
+    --card-foreground: 210 20% 98%;
+    --popover: 220 22% 9%;
+    --popover-foreground: 210 20% 98%;
+    --primary: 262.1 83.3% 65%;
+    --primary-foreground: 210 20% 98%;
+    --secondary: 215 27.9% 16.9%;
+    --secondary-foreground: 210 20% 98%;
+    --muted: 215 27.9% 16.9%;
+    --muted-foreground: 217.9 10.6% 64.9%;
+    --accent: 215 27.9% 16.9%;
+    --accent-foreground: 210 20% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 20% 98%;
+    --border: 215 27.9% 16.9%;
+    --input: 215 27.9% 16.9%;
+    --ring: 262.1 83.3% 57.8%;
+
+    --sidebar-background: 246 53% 12%;
+    --sidebar-foreground: 240 10% 85%;
+    --sidebar-primary: 262.1 83.3% 65%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 246 40% 18%;
+    --sidebar-accent-foreground: 240 10% 95%;
+    --sidebar-border: 246 40% 16%;
+    --sidebar-ring: 262.1 83.3% 57.8%;
+
+    --nav-background: 246 62% 8%;
+    --nav-foreground: 240 10% 70%;
+    --nav-active: 262.1 83.3% 65%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.25);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.45); }
+
+/* Sidebar scrollbar */
+.sidebar-scroll::-webkit-scrollbar { width: 3px; }
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: hsl(var(--sidebar-foreground) / 0.15);
+  border-radius: 3px;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--sidebar-foreground) / 0.3);
+}
+
+/* TipTap ProseMirror */
+.ProseMirror {
+  outline: none;
+  min-height: 22px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.ProseMirror p { margin: 0; }
+.ProseMirror p.is-editor-empty:first-child::before {
+  color: hsl(var(--muted-foreground));
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+.ProseMirror code {
+  background-color: hsl(var(--muted));
+  border-radius: 0.25rem;
+  font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
+  font-size: 0.875em;
+  padding: 0.1rem 0.3rem;
+}
+.ProseMirror pre {
+  background-color: hsl(var(--muted));
+  border-radius: 0.375rem;
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+  font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
+  font-size: 0.875em;
+}
+.ProseMirror blockquote {
+  border-left: 3px solid hsl(var(--primary) / 0.5);
+  margin-left: 0;
+  padding-left: 0.875rem;
+  color: hsl(var(--muted-foreground));
+}
+.ProseMirror ul, .ProseMirror ol { padding-left: 1.5rem; }
+.ProseMirror a { color: hsl(var(--primary)); text-decoration: underline; text-underline-offset: 2px; }
+.ProseMirror strong { font-weight: 600; }
+.ProseMirror em { font-style: italic; }
+.mention {
+  background-color: hsl(var(--primary) / 0.12);
+  border-radius: 0.2rem;
+  color: hsl(var(--primary));
+  font-weight: 500;
+  padding: 0.1rem 0.25rem;
+  cursor: pointer;
+}
+
+/* Message hover reveal */
+.message-row:hover .message-actions { opacity: 1; }
+.message-actions { opacity: 0; transition: opacity 0.15s; }
+
+/* Animations */
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.animate-fadeIn { animation: fadeIn 0.2s ease-out; }
+
+@keyframes slideInRight { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: none; } }
+.animate-slideInRight { animation: slideInRight 0.25s ease-out; }
+
+/* Typing indicator dots */
+@keyframes typing-bounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
+}
+.typing-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: typing-bounce 1.4s infinite ease-in-out; }
+.typing-dot:nth-child(1) { animation-delay: -0.32s; }
+.typing-dot:nth-child(2) { animation-delay: -0.16s; }
+.typing-dot:nth-child(3) { animation-delay: 0s; }
+
+/* Sidebar channel item hover */
+.sidebar-channel-item:hover { background: hsl(var(--sidebar-accent)) !important; }
+.sidebar-channel-item { transition: background 0.1s; }

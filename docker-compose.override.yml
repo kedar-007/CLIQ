@@ -1,0 +1,9 @@
+# Local development overrides
+services:
+  postgres:
+    environment:
+      POSTGRES_DB: comms_platform_dev
+
+  elasticsearch:
+    environment:
+      - ES_JAVA_OPTS=-Xms256m -Xmx256m

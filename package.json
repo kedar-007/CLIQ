@@ -1,0 +1,34 @@
+{
+  "name": "comms-platform",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "turbo run dev --concurrency=25 --filter=!@comms/desktop",
+    "dev:services": "turbo run dev --concurrency=20 --filter=!@comms/web --filter=!@comms/admin --filter=!@comms/desktop",
+    "dev:web": "turbo run dev --filter=@comms/web",
+    "dev:admin": "turbo run dev --filter=@comms/admin",
+    "dev:desktop": "turbo run dev --filter=@comms/desktop",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
+    "db:generate": "turbo run db:generate",
+    "db:migrate": "turbo run db:migrate",
+    "db:studio": "cd packages/db && prisma studio",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "setup": "pnpm install && pnpm db:generate && pnpm docker:up"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.5",
+    "prettier": "^3.2.4",
+    "turbo": "^1.12.4",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "packageManager": "pnpm@8.15.1"
+}

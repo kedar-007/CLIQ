@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+.next/
+out/
+build/
+
+# Turbo
+.turbo/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Database
+*.db
+*.sqlite
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Testing
+coverage/
+.nyc_output/
+
+# Docker volumes
+pgdata/
+redisdata/
+esdata/
+miniodata/
+kafkadata/
+
+# Prisma
+packages/db/node_modules/
+
+# Generated
+packages/db/src/generated/

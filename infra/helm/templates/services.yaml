@@ -1,0 +1,77 @@
+{{- $serviceList := list "auth" "chat" "call" "notification" "file" "search" "calendar" "task" "bot" "integration" "ai" "analytics" "billing" }}
+{{- $portMap := dict "auth" 3001 "chat" 3002 "call" 3003 "notification" 3004 "file" 3005 "search" 3006 "calendar" 3007 "task" 3008 "bot" 3009 "integration" 3010 "ai" 3011 "analytics" 3012 "billing" 3013 }}
+{{- range $serviceName := $serviceList }}
+{{- $serviceValues := index $.Values.services $serviceName }}
+{{- if $serviceValues.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $serviceName }}-service
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "comms.serviceLabels" (dict "serviceName" $serviceName "context" $) | nindent 4 }}
+spec:
+  replicas: {{ $serviceValues.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "comms.serviceSelectorLabels" (dict "serviceName" $serviceName "context" $) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "comms.serviceSelectorLabels" (dict "serviceName" $serviceName "context" $) | nindent 8 }}
+    spec:
+      containers:
+        - name: {{ $serviceName }}-service
+          image: {{ include "comms.serviceImage" (dict "serviceValues" $serviceValues "context" $) }}
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ index $portMap $serviceName }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml $serviceValues.resources | nindent 12 }}
+          envFrom:
+            {{- toYaml $.Values.sharedEnvFrom | nindent 12 }}
+          {{- if $serviceValues.env }}
+          env:
+            {{- range $key, $value := $serviceValues.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $serviceName }}-service
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "comms.serviceLabels" (dict "serviceName" $serviceName "context" $) | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ index $portMap $serviceName }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "comms.serviceSelectorLabels" (dict "serviceName" $serviceName "context" $) | nindent 4 }}
+{{- end }}
+{{- end }}

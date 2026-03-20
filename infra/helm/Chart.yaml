@@ -1,0 +1,17 @@
+apiVersion: v2
+name: comms-platform
+description: DSV-CLIQ Multi-tenant SaaS communication platform
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - communication
+  - saas
+  - chat
+  - collaboration
+home: https://dsvcliq.com
+sources:
+  - https://github.com/dsv/cliq
+maintainers:
+  - name: DSV Team
+    email: ops@dsvcliq.com

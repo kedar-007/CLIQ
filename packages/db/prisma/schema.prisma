@@ -1,0 +1,1155 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ──────────────────────────────────────────────────────────────────
+
+enum TenantPlan {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+enum DataRegion {
+  US
+  EU
+  IN
+  AU
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MODERATOR
+  MEMBER
+  GUEST
+}
+
+enum UserStatus {
+  ONLINE
+  AWAY
+  OFFLINE
+  DND
+}
+
+enum OAuthProvider {
+  GOOGLE
+  GITHUB
+  MICROSOFT
+}
+
+enum ChannelType {
+  PUBLIC
+  PRIVATE
+  DM
+  GROUP_DM
+  SHARED
+  ANNOUNCEMENT
+}
+
+enum ChannelMemberRole {
+  OWNER
+  MODERATOR
+  MEMBER
+}
+
+enum NotificationPreference {
+  ALL
+  MENTIONS
+  NOTHING
+}
+
+enum MessageType {
+  TEXT
+  FILE
+  CALL
+  SYSTEM
+  BOT
+  GIPHY
+}
+
+enum CallType {
+  AUDIO
+  VIDEO
+  PSTN
+  WEBINAR
+  TOWNHALL
+}
+
+enum CallParticipantRole {
+  HOST
+  PRESENTER
+  ATTENDEE
+}
+
+enum CalendarEventSource {
+  INTERNAL
+  GOOGLE
+  MICROSOFT
+}
+
+enum AttendeeStatus {
+  ACCEPTED
+  DECLINED
+  TENTATIVE
+  PENDING
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum VirusScanStatus {
+  PENDING
+  CLEAN
+  INFECTED
+  ERROR
+}
+
+enum WebhookEventStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum BillingSubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  UNPAID
+}
+
+enum InvoiceStatus {
+  DRAFT
+  OPEN
+  PAID
+  VOID
+  UNCOLLECTIBLE
+}
+
+enum Theme {
+  LIGHT
+  DARK
+  SYSTEM
+}
+
+enum EmailDigest {
+  INSTANT
+  HOURLY
+  DAILY
+  NEVER
+}
+
+// ─── TENANT ─────────────────────────────────────────────────────────────────
+
+model Tenant {
+  id               String     @id @default(cuid())
+  slug             String     @unique
+  name             String
+  plan             TenantPlan @default(FREE)
+  logoUrl          String?
+  brandColor       String?    @default("#6366f1")
+  customDomain     String?    @unique
+  dataRegion       DataRegion @default(US)
+  samlConfig       Json?
+  scimToken        String?    @unique
+  stripeCustomerId String?
+  stripePlanId     String?
+  trialEndsAt      DateTime?
+  settings         Json       @default("{}")
+  isActive         Boolean    @default(true)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  users                 User[]
+  channels              Channel[]
+  calendarEvents        CalendarEvent[]
+  tasks                 Task[]
+  taskLabels            TaskLabel[]
+  notifications         Notification[]
+  bots                  Bot[]
+  integrations          Integration[]
+  webhooks              Webhook[]
+  workflowAutomations   WorkflowAutomation[]
+  auditLogs             AuditLog[]
+  billingSubscriptions  BillingSubscription[]
+  invoices              Invoice[]
+  meetingRooms          MeetingRoom[]
+  deskBookings          DeskBooking[]
+  customEmojis          CustomEmoji[]
+  callSessions          CallSession[]
+  workspaces            Workspace[]
+
+  @@map("tenants")
+  @@index([slug])
+  @@index([stripeCustomerId])
+}
+
+// ─── USER ────────────────────────────────────────────────────────────────────
+
+model User {
+  id                      String     @id @default(cuid())
+  tenantId                String
+  email                   String
+  passwordHash            String?
+  name                    String
+  avatarUrl               String?
+  role                    UserRole   @default(MEMBER)
+  status                  UserStatus @default(OFFLINE)
+  customStatusEmoji       String?
+  customStatusText        String?
+  customStatusExpiresAt   DateTime?
+  lastSeen                DateTime?
+  isEmailVerified         Boolean    @default(false)
+  emailVerificationToken  String?
+  mfaEnabled              Boolean    @default(false)
+  mfaSecret               String?
+  phoneNumber             String?
+  department              String?
+  jobTitle                String?
+  timezone                String?    @default("UTC")
+  locale                  String?    @default("en")
+  namePronunciationUrl    String?
+  scimExternalId          String?
+  isDeactivated           Boolean    @default(false)
+  createdAt               DateTime   @default(now())
+  updatedAt               DateTime   @updatedAt
+
+  tenant              Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  oauthAccounts       OAuthAccount[]
+  refreshTokens       RefreshToken[]
+  mfaBackupCodes      MfaBackupCode[]
+  sessions            Session[]
+  channelMembers      ChannelMember[]
+  messages            Message[]
+  messageReads        MessageRead[]
+  messageReactions    MessageReaction[]
+  messagePins         MessagePin[]
+  savedMessages       SavedMessage[]
+  reactions           Reaction[]
+  callParticipants    CallParticipant[]
+  calendarEvents      CalendarEvent[]     @relation("CalendarEventCreator")
+  calendarAttendees   CalendarAttendee[]
+  tasks               Task[]              @relation("TaskCreator")
+  taskComments        TaskComment[]
+  taskActivities      TaskActivity[]
+  taskReminders       TaskReminder[]
+  notifications       Notification[]
+  polls               Poll[]
+  pollVotes           PollVote[]
+  deskBookings        DeskBooking[]
+  userPreference      UserPreference?
+  auditLogs           AuditLog[]
+  customEmojis        CustomEmoji[]
+  attachments         Attachment[]
+  fileVersions        FileVersion[]
+
+  @@unique([tenantId, email])
+  @@map("users")
+  @@index([tenantId])
+  @@index([email])
+  @@index([scimExternalId])
+  @@index([status])
+}
+
+// ─── AUTH ────────────────────────────────────────────────────────────────────
+
+model OAuthAccount {
+  id                String        @id @default(cuid())
+  userId            String
+  provider          OAuthProvider
+  providerAccountId String
+  accessToken       String?
+  refreshToken      String?
+  expiresAt         DateTime?
+  createdAt         DateTime      @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("oauth_accounts")
+  @@index([userId])
+}
+
+model RefreshToken {
+  id         String   @id @default(cuid())
+  userId     String
+  token      String   @unique
+  deviceInfo String?
+  ipAddress  String?
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+  @@index([userId])
+  @@index([token])
+}
+
+model MfaBackupCode {
+  id     String    @id @default(cuid())
+  userId String
+  code   String
+  usedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("mfa_backup_codes")
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  tokenHash    String   @unique
+  deviceInfo   String?
+  ipAddress    String?
+  lastActiveAt DateTime @default(now())
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+  @@index([userId])
+  @@index([tokenHash])
+}
+
+// ─── CHANNELS ────────────────────────────────────────────────────────────────
+
+model Channel {
+  id                   String      @id @default(cuid())
+  tenantId             String
+  name                 String
+  slug                 String
+  description          String?
+  topic                String?
+  type                 ChannelType @default(PUBLIC)
+  createdBy            String
+  isArchived           Boolean     @default(false)
+  isDefault            Boolean     @default(false)
+  maxMembers           Int?
+  joinApprovalRequired Boolean     @default(false)
+  retentionDays        Int?
+  isReadOnly           Boolean     @default(false)
+  externalTenantIds    String[]    @default([])
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  members     ChannelMember[]
+  messages    Message[]
+  pins        MessagePin[]
+  attachments Attachment[]
+  polls       Poll[]
+  tasks       Task[]
+  bots        BotInstall[]
+
+  @@unique([tenantId, slug])
+  @@map("channels")
+  @@index([tenantId])
+  @@index([type])
+  @@index([isArchived])
+}
+
+model ChannelMember {
+  id                     String                 @id @default(cuid())
+  channelId              String
+  userId                 String
+  role                   ChannelMemberRole      @default(MEMBER)
+  lastReadAt             DateTime?
+  notificationPreference NotificationPreference @default(ALL)
+  isMuted                Boolean                @default(false)
+  joinedAt               DateTime               @default(now())
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@map("channel_members")
+  @@index([channelId])
+  @@index([userId])
+}
+
+// ─── MESSAGES ────────────────────────────────────────────────────────────────
+
+model Message {
+  id          String      @id @default(cuid())
+  channelId   String
+  senderId    String
+  content     String?
+  contentRaw  Json?
+  type        MessageType @default(TEXT)
+  threadId    String?
+  parentId    String?
+  isEdited    Boolean     @default(false)
+  editedAt    DateTime?
+  deletedAt   DateTime?
+  scheduledAt DateTime?
+  deliveredAt DateTime?
+  metadata    Json?       @default("{}")
+  createdAt   DateTime    @default(now())
+
+  channel     Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  sender      User              @relation(fields: [senderId], references: [id])
+  parent      Message?          @relation("MessageThread", fields: [parentId], references: [id])
+  replies     Message[]         @relation("MessageThread")
+  reads       MessageRead[]
+  reactions   MessageReaction[]
+  pins        MessagePin[]
+  saved       SavedMessage[]
+  versions    MessageVersion[]
+  attachments Attachment[]
+  thread      Thread?           @relation(fields: [threadId], references: [id])
+
+  @@map("messages")
+  @@index([channelId])
+  @@index([senderId])
+  @@index([threadId])
+  @@index([parentId])
+  @@index([createdAt])
+  @@index([deletedAt])
+}
+
+model MessageRead {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  readAt    DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@map("message_reads")
+  @@index([messageId])
+  @@index([userId])
+}
+
+model MessageReaction {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@map("message_reactions")
+  @@index([messageId])
+}
+
+model MessagePin {
+  id        String   @id @default(cuid())
+  channelId String
+  messageId String
+  pinnedBy  String
+  pinnedAt  DateTime @default(now())
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  pinner  User    @relation(fields: [pinnedBy], references: [id])
+
+  @@unique([channelId, messageId])
+  @@map("message_pins")
+  @@index([channelId])
+}
+
+model SavedMessage {
+  id        String   @id @default(cuid())
+  userId    String
+  messageId String
+  savedAt   DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, messageId])
+  @@map("saved_messages")
+  @@index([userId])
+}
+
+model MessageVersion {
+  id        String   @id @default(cuid())
+  messageId String
+  content   String
+  editedAt  DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@map("message_versions")
+  @@index([messageId])
+}
+
+model Reaction {
+  id        String   @id @default(cuid())
+  userId    String
+  messageId String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("reactions")
+  @@index([userId])
+  @@index([messageId])
+}
+
+// ─── THREADS ─────────────────────────────────────────────────────────────────
+
+model Thread {
+  id              String   @id @default(cuid())
+  channelId       String
+  parentMessageId String   @unique
+  participantIds  String[] @default([])
+  lastActivityAt  DateTime @default(now())
+  replyCount      Int      @default(0)
+  isFollowedBy    String[] @default([])
+  createdAt       DateTime @default(now())
+
+  messages Message[]
+
+  @@map("threads")
+  @@index([channelId])
+  @@index([lastActivityAt])
+}
+
+// ─── ATTACHMENTS ─────────────────────────────────────────────────────────────
+
+model Attachment {
+  id               String          @id @default(cuid())
+  messageId        String?
+  channelId        String
+  uploaderId       String
+  fileName         String
+  fileKey          String          @unique
+  fileUrl          String
+  thumbnailUrl     String?
+  mimeType         String
+  fileSize         Int
+  version          Int             @default(1)
+  ocrText          String?
+  virusScanStatus  VirusScanStatus @default(PENDING)
+  expiresAt        DateTime?
+  deletedAt        DateTime?
+  createdAt        DateTime        @default(now())
+
+  message      Message?      @relation(fields: [messageId], references: [id])
+  channel      Channel       @relation(fields: [channelId], references: [id])
+  uploader     User          @relation(fields: [uploaderId], references: [id])
+  fileVersions FileVersion[]
+
+  @@map("attachments")
+  @@index([messageId])
+  @@index([channelId])
+  @@index([uploaderId])
+  @@index([deletedAt])
+}
+
+model FileVersion {
+  id           String   @id @default(cuid())
+  attachmentId String
+  fileKey      String
+  fileUrl      String
+  fileSize     Int
+  uploadedBy   String
+  uploadedAt   DateTime @default(now())
+
+  attachment Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  uploader   User       @relation(fields: [uploadedBy], references: [id])
+
+  @@map("file_versions")
+  @@index([attachmentId])
+}
+
+// ─── CALLS ───────────────────────────────────────────────────────────────────
+
+model CallSession {
+  id               String    @id @default(cuid())
+  tenantId         String
+  channelId        String?
+  liveKitRoomId    String?   @unique
+  twilioCallSid    String?
+  type             CallType  @default(VIDEO)
+  startedBy        String
+  startedAt        DateTime  @default(now())
+  endedAt          DateTime?
+  recordingUrl     String?
+  transcriptUrl    String?
+  summaryText      String?
+  participantCount Int       @default(0)
+  metadata         Json?     @default("{}")
+
+  tenant       Tenant            @relation(fields: [tenantId], references: [id])
+  participants CallParticipant[]
+
+  @@map("call_sessions")
+  @@index([tenantId])
+  @@index([channelId])
+  @@index([startedAt])
+}
+
+model CallParticipant {
+  id            String              @id @default(cuid())
+  callSessionId String
+  userId        String
+  joinedAt      DateTime            @default(now())
+  leftAt        DateTime?
+  role          CallParticipantRole @default(ATTENDEE)
+  audioEnabled  Boolean             @default(true)
+  videoEnabled  Boolean             @default(false)
+  screenSharing Boolean             @default(false)
+
+  callSession CallSession @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id])
+
+  @@map("call_participants")
+  @@index([callSessionId])
+  @@index([userId])
+}
+
+// ─── CALENDAR ────────────────────────────────────────────────────────────────
+
+model CalendarEvent {
+  id                   String              @id @default(cuid())
+  tenantId             String
+  creatorId            String
+  title                String
+  description          String?
+  location             String?
+  startAt              DateTime
+  endAt                DateTime
+  isAllDay             Boolean             @default(false)
+  recurrenceRule       String?
+  recurrenceExceptions String[]            @default([])
+  meetingLink          String?
+  callSessionId        String?
+  externalCalendarId   String?
+  externalEventId      String?
+  source               CalendarEventSource @default(INTERNAL)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  tenant    Tenant             @relation(fields: [tenantId], references: [id])
+  creator   User               @relation("CalendarEventCreator", fields: [creatorId], references: [id])
+  attendees CalendarAttendee[]
+
+  @@map("calendar_events")
+  @@index([tenantId])
+  @@index([creatorId])
+  @@index([startAt])
+  @@index([endAt])
+}
+
+model CalendarAttendee {
+  id            String         @id @default(cuid())
+  eventId       String
+  userId        String?
+  externalEmail String?
+  status        AttendeeStatus @default(PENDING)
+  isOrganizer   Boolean        @default(false)
+  respondedAt   DateTime?
+
+  event CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User?         @relation(fields: [userId], references: [id])
+
+  @@map("calendar_attendees")
+  @@index([eventId])
+  @@index([userId])
+}
+
+// ─── TASKS ───────────────────────────────────────────────────────────────────
+
+model Task {
+  id               String       @id @default(cuid())
+  tenantId         String
+  channelId        String?
+  creatorId        String
+  title            String
+  description      String?
+  status           TaskStatus   @default(TODO)
+  priority         TaskPriority @default(MEDIUM)
+  dueAt            DateTime?
+  estimatedMinutes Int?
+  assigneeIds      String[]     @default([])
+  labelIds         String[]     @default([])
+  parentTaskId     String?
+  externalTaskId   String?
+  externalSystem   String?
+  customFields     Json?        @default("{}")
+  completedAt      DateTime?
+  deletedAt        DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  tenant     Tenant          @relation(fields: [tenantId], references: [id])
+  channel    Channel?        @relation(fields: [channelId], references: [id])
+  creator    User            @relation("TaskCreator", fields: [creatorId], references: [id])
+  parent     Task?           @relation("TaskSubtasks", fields: [parentTaskId], references: [id])
+  subtasks   Task[]          @relation("TaskSubtasks")
+  comments   TaskComment[]
+  activities TaskActivity[]
+  checklists TaskChecklist[]
+  reminders  TaskReminder[]
+
+  @@map("tasks")
+  @@index([tenantId])
+  @@index([channelId])
+  @@index([creatorId])
+  @@index([status])
+  @@index([dueAt])
+  @@index([deletedAt])
+}
+
+model TaskComment {
+  id        String   @id @default(cuid())
+  taskId    String
+  authorId  String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  task   Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author User @relation(fields: [authorId], references: [id])
+
+  @@map("task_comments")
+  @@index([taskId])
+}
+
+model TaskActivity {
+  id        String   @id @default(cuid())
+  taskId    String
+  actorId   String
+  action    String
+  oldValue  Json?
+  newValue  Json?
+  createdAt DateTime @default(now())
+
+  task  Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  actor User @relation(fields: [actorId], references: [id])
+
+  @@map("task_activities")
+  @@index([taskId])
+  @@index([actorId])
+}
+
+model TaskLabel {
+  id       String @id @default(cuid())
+  tenantId String
+  name     String
+  color    String @default("#6366f1")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, name])
+  @@map("task_labels")
+  @@index([tenantId])
+}
+
+model TaskChecklist {
+  id          String    @id @default(cuid())
+  taskId      String
+  title       String
+  isComplete  Boolean   @default(false)
+  completedAt DateTime?
+  sortOrder   Int       @default(0)
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@map("task_checklists")
+  @@index([taskId])
+}
+
+model TaskReminder {
+  id       String    @id @default(cuid())
+  taskId   String
+  userId   String
+  remindAt DateTime
+  sentAt   DateTime?
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("task_reminders")
+  @@index([taskId])
+  @@index([userId])
+  @@index([remindAt])
+}
+
+// ─── NOTIFICATIONS ───────────────────────────────────────────────────────────
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  tenantId  String
+  type      String
+  title     String
+  body      String
+  data      Json?     @default("{}")
+  channelId String?
+  messageId String?
+  taskId    String?
+  isRead    Boolean   @default(false)
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@map("notifications")
+  @@index([userId])
+  @@index([tenantId])
+  @@index([isRead])
+  @@index([createdAt])
+}
+
+// ─── BOTS ────────────────────────────────────────────────────────────────────
+
+model Bot {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  avatarUrl   String?
+  description String?
+  webhookUrl  String?
+  isBuiltin   Boolean  @default(false)
+  permissions Json?    @default("{}")
+  isActive    Boolean  @default(true)
+  createdBy   String
+  createdAt   DateTime @default(now())
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  installs      BotInstall[]
+  slashCommands SlashCommand[]
+
+  @@map("bots")
+  @@index([tenantId])
+}
+
+model BotInstall {
+  id          String   @id @default(cuid())
+  botId       String
+  channelId   String
+  installedBy String
+  installedAt DateTime @default(now())
+
+  bot     Bot     @relation(fields: [botId], references: [id], onDelete: Cascade)
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([botId, channelId])
+  @@map("bot_installs")
+  @@index([botId])
+  @@index([channelId])
+}
+
+model SlashCommand {
+  id          String  @id @default(cuid())
+  botId       String
+  command     String
+  description String
+  hint        String?
+  isGlobal    Boolean @default(false)
+
+  bot Bot @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@unique([botId, command])
+  @@map("slash_commands")
+  @@index([botId])
+}
+
+// ─── INTEGRATIONS ────────────────────────────────────────────────────────────
+
+model Integration {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  type        String
+  config      Json?    @default("{}")
+  channelId   String?
+  installedBy String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  webhooks Webhook[]
+
+  @@map("integrations")
+  @@index([tenantId])
+  @@index([type])
+}
+
+model Webhook {
+  id              String    @id @default(cuid())
+  integrationId   String?
+  tenantId        String
+  url             String
+  secret          String?
+  events          String[]  @default([])
+  isActive        Boolean   @default(true)
+  lastTriggeredAt DateTime?
+  failureCount    Int       @default(0)
+  createdAt       DateTime  @default(now())
+
+  integration Integration?   @relation(fields: [integrationId], references: [id])
+  tenant      Tenant         @relation(fields: [tenantId], references: [id])
+  events_log  WebhookEvent[]
+
+  @@map("webhooks")
+  @@index([tenantId])
+  @@index([integrationId])
+}
+
+model WebhookEvent {
+  id           String             @id @default(cuid())
+  webhookId    String
+  payload      Json
+  status       WebhookEventStatus @default(PENDING)
+  statusCode   Int?
+  responseBody String?
+  attemptCount Int                @default(0)
+  nextRetryAt  DateTime?
+  processedAt  DateTime?
+  createdAt    DateTime           @default(now())
+
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@map("webhook_events")
+  @@index([webhookId])
+  @@index([status])
+}
+
+// ─── WORKFLOWS ───────────────────────────────────────────────────────────────
+
+model WorkflowAutomation {
+  id         String    @id @default(cuid())
+  tenantId   String
+  name       String
+  trigger    Json
+  conditions Json[]    @default([])
+  actions    Json[]
+  isActive   Boolean   @default(true)
+  createdBy  String
+  runCount   Int       @default(0)
+  lastRunAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@map("workflow_automations")
+  @@index([tenantId])
+  @@index([isActive])
+}
+
+// ─── WORKSPACES ──────────────────────────────────────────────────────────────
+
+model Workspace {
+  id        String  @id @default(cuid())
+  tenantId  String
+  name      String
+  theme     Json?   @default("{}")
+  isDefault Boolean @default(false)
+  settings  Json?   @default("{}")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@map("workspaces")
+  @@index([tenantId])
+}
+
+// ─── AUDIT LOG ───────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  tenantId     String
+  actorId      String
+  action       String
+  resourceType String
+  resourceId   String
+  oldValue     Json?
+  newValue     Json?
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  actor  User   @relation(fields: [actorId], references: [id])
+
+  @@map("audit_logs")
+  @@index([tenantId])
+  @@index([actorId])
+  @@index([createdAt])
+  @@index([resourceType, resourceId])
+}
+
+// ─── BILLING ─────────────────────────────────────────────────────────────────
+
+model BillingSubscription {
+  id                   String                    @id @default(cuid())
+  tenantId             String
+  stripeSubscriptionId String                    @unique
+  planId               String
+  status               BillingSubscriptionStatus @default(ACTIVE)
+  currentPeriodStart   DateTime
+  currentPeriodEnd     DateTime
+  cancelAtPeriodEnd    Boolean                   @default(false)
+  seatCount            Int                       @default(1)
+  storageGbUsed        Float                     @default(0)
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@map("billing_subscriptions")
+  @@index([tenantId])
+  @@index([status])
+}
+
+model Invoice {
+  id              String        @id @default(cuid())
+  tenantId        String
+  stripeInvoiceId String        @unique
+  amount          Int
+  currency        String        @default("usd")
+  status          InvoiceStatus @default(OPEN)
+  pdfUrl          String?
+  periodStart     DateTime
+  periodEnd       DateTime
+  paidAt          DateTime?
+  createdAt       DateTime      @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@map("invoices")
+  @@index([tenantId])
+  @@index([status])
+}
+
+// ─── MEETING ROOMS & DESKS ───────────────────────────────────────────────────
+
+model MeetingRoom {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  capacity  Int
+  location  String?
+  floorPlan Json?
+  amenities String[] @default([])
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@map("meeting_rooms")
+  @@index([tenantId])
+}
+
+model DeskBooking {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  deskId    String
+  date      DateTime
+  startTime DateTime
+  endTime   DateTime
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@map("desk_bookings")
+  @@index([tenantId])
+  @@index([userId])
+  @@index([date])
+}
+
+// ─── POLLS ───────────────────────────────────────────────────────────────────
+
+model Poll {
+  id            String    @id @default(cuid())
+  channelId     String
+  creatorId     String
+  question      String
+  options       Json
+  isAnonymous   Boolean   @default(false)
+  allowMultiple Boolean   @default(false)
+  closesAt      DateTime?
+  createdAt     DateTime  @default(now())
+
+  channel Channel    @relation(fields: [channelId], references: [id])
+  creator User       @relation(fields: [creatorId], references: [id])
+  votes   PollVote[]
+
+  @@map("polls")
+  @@index([channelId])
+  @@index([creatorId])
+}
+
+model PollVote {
+  id              String   @id @default(cuid())
+  pollId          String
+  userId          String
+  selectedOptions String[] @default([])
+  votedAt         DateTime @default(now())
+
+  poll Poll @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([pollId, userId])
+  @@map("poll_votes")
+  @@index([pollId])
+}
+
+// ─── CUSTOM EMOJI ────────────────────────────────────────────────────────────
+
+model CustomEmoji {
+  id         String   @id @default(cuid())
+  tenantId   String
+  name       String
+  imageUrl   String
+  uploadedBy String
+  createdAt  DateTime @default(now())
+
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+  uploader User   @relation(fields: [uploadedBy], references: [id])
+
+  @@unique([tenantId, name])
+  @@map("custom_emojis")
+  @@index([tenantId])
+}
+
+// ─── USER PREFERENCES ────────────────────────────────────────────────────────
+
+model UserPreference {
+  id              String      @id @default(cuid())
+  userId          String      @unique
+  theme           Theme       @default(SYSTEM)
+  notifSound      String?     @default("default")
+  locale          String?     @default("en")
+  emailDigest     EmailDigest @default(HOURLY)
+  quietHoursStart String?
+  quietHoursEnd   String?
+  keyboardLayout  String?
+  sidebarSections Json?       @default("[]")
+  settings        Json?       @default("{}")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}

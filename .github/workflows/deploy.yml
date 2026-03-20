@@ -1,0 +1,195 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+  EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME }}
+  PNPM_VERSION: 8.15.1
+  NODE_VERSION: "20"
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────────
+  deploy-to-staging:
+    name: Build & Push Docker Images to ECR
+    runs-on: ubuntu-latest
+    environment: staging
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - auth-service
+          - chat-service
+          - call-service
+          - notification-service
+          - file-service
+          - search-service
+          - calendar-service
+          - task-service
+          - bot-service
+          - integration-service
+          - ai-service
+          - analytics-service
+          - billing-service
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push to ECR
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/${{ matrix.service }}/Dockerfile
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ matrix.service }}:${{ github.sha }}
+            ${{ env.ECR_REGISTRY }}/${{ matrix.service }}:latest
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  # ──────────────────────────────────────────────────────────────────────────────
+  deploy-k8s:
+    name: Deploy to Kubernetes (EKS)
+    runs-on: ubuntu-latest
+    needs: deploy-to-staging
+    environment: staging
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ env.AWS_REGION }} \
+            --name ${{ env.EKS_CLUSTER_NAME }}
+
+      - name: Apply Kubernetes namespace and base resources
+        run: |
+          kubectl apply -f infra/k8s/namespace.yaml
+          kubectl apply -f infra/k8s/configmap.yaml
+
+      - name: Update auth-service image
+        run: |
+          kubectl set image deployment/auth-service \
+            auth-service=${{ env.ECR_REGISTRY }}/auth-service:${{ github.sha }} \
+            -n comms-prod
+
+      - name: Update chat-service image
+        run: |
+          kubectl set image deployment/chat-service \
+            chat-service=${{ env.ECR_REGISTRY }}/chat-service:${{ github.sha }} \
+            -n comms-prod
+
+      - name: Update call-service image
+        run: |
+          kubectl set image deployment/call-service \
+            call-service=${{ env.ECR_REGISTRY }}/call-service:${{ github.sha }} \
+            -n comms-prod
+
+      - name: Update notification-service image
+        run: |
+          kubectl set image deployment/notification-service \
+            notification-service=${{ env.ECR_REGISTRY }}/notification-service:${{ github.sha }} \
+            -n comms-prod
+
+      - name: Update file-service image
+        run: |
+          kubectl set image deployment/file-service \
+            file-service=${{ env.ECR_REGISTRY }}/file-service:${{ github.sha }} \
+            -n comms-prod
+
+      - name: Update search-service image
+        run: |
+          kubectl set image deployment/search-service \
+            search-service=${{ env.ECR_REGISTRY }}/search-service:${{ github.sha }} \
+            -n comms-prod
+
+      - name: Update calendar-service image
+        run: |
+          kubectl set image deployment/calendar-service \
+            calendar-service=${{ env.ECR_REGISTRY }}/calendar-service:${{ github.sha }} \
+            -n comms-prod
+
+      - name: Update task-service image
+        run: |
+          kubectl set image deployment/task-service \
+            task-service=${{ env.ECR_REGISTRY }}/task-service:${{ github.sha }} \
+            -n comms-prod
+
+      - name: Update bot-service image
+        run: |
+          kubectl set image deployment/bot-service \
+            bot-service=${{ env.ECR_REGISTRY }}/bot-service:${{ github.sha }} \
+            -n comms-prod
+
+      - name: Update integration-service image
+        run: |
+          kubectl set image deployment/integration-service \
+            integration-service=${{ env.ECR_REGISTRY }}/integration-service:${{ github.sha }} \
+            -n comms-prod
+
+      - name: Update ai-service image
+        run: |
+          kubectl set image deployment/ai-service \
+            ai-service=${{ env.ECR_REGISTRY }}/ai-service:${{ github.sha }} \
+            -n comms-prod
+
+      - name: Update analytics-service image
+        run: |
+          kubectl set image deployment/analytics-service \
+            analytics-service=${{ env.ECR_REGISTRY }}/analytics-service:${{ github.sha }} \
+            -n comms-prod
+
+      - name: Update billing-service image
+        run: |
+          kubectl set image deployment/billing-service \
+            billing-service=${{ env.ECR_REGISTRY }}/billing-service:${{ github.sha }} \
+            -n comms-prod
+
+      - name: Wait for rollouts to complete
+        run: |
+          kubectl rollout status deployment/auth-service -n comms-prod --timeout=300s
+          kubectl rollout status deployment/chat-service -n comms-prod --timeout=300s
+          kubectl rollout status deployment/call-service -n comms-prod --timeout=300s
+          kubectl rollout status deployment/notification-service -n comms-prod --timeout=300s
+          kubectl rollout status deployment/file-service -n comms-prod --timeout=300s
+          kubectl rollout status deployment/search-service -n comms-prod --timeout=300s
+          kubectl rollout status deployment/calendar-service -n comms-prod --timeout=300s
+          kubectl rollout status deployment/task-service -n comms-prod --timeout=300s
+          kubectl rollout status deployment/bot-service -n comms-prod --timeout=300s
+          kubectl rollout status deployment/integration-service -n comms-prod --timeout=300s
+          kubectl rollout status deployment/ai-service -n comms-prod --timeout=300s
+          kubectl rollout status deployment/analytics-service -n comms-prod --timeout=300s
+          kubectl rollout status deployment/billing-service -n comms-prod --timeout=300s
+
+      - name: Verify deployment health
+        run: |
+          kubectl get deployments -n comms-prod
+          kubectl get pods -n comms-prod
