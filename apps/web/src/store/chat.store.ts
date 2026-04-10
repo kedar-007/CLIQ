@@ -12,8 +12,12 @@ interface ChatState {
   // Channels
   channels: Channel[];
   activeChannelId: string | null;
+  openChannelIds: string[];
+  pinnedChannelIds: string[];
   setChannels: (channels: Channel[]) => void;
   setActiveChannel: (channelId: string | null) => void;
+  closeChannel: (channelId: string) => void;
+  togglePinnedChannel: (channelId: string) => void;
   updateChannel: (channelId: string, updates: Partial<Channel>) => void;
 
   // Messages
@@ -42,13 +46,41 @@ interface ChatState {
 export const useChatStore = create<ChatState>((set) => ({
   channels: [],
   activeChannelId: null,
+  openChannelIds: [],
+  pinnedChannelIds: [],
   messages: {},
   typingUsers: {},
   unreadCounts: {},
   activeThreadMessageId: null,
 
   setChannels: (channels) => set({ channels }),
-  setActiveChannel: (channelId) => set({ activeChannelId: channelId }),
+  setActiveChannel: (channelId) =>
+    set((state) => {
+      if (!channelId) return { activeChannelId: null };
+
+      const nextOpen = state.openChannelIds.includes(channelId)
+        ? [...state.openChannelIds]
+        : [...state.openChannelIds, channelId].slice(-3);
+
+      return {
+        activeChannelId: channelId,
+        openChannelIds: nextOpen,
+      };
+    }),
+  closeChannel: (channelId) =>
+    set((state) => {
+      const nextOpen = state.openChannelIds.filter((id) => id !== channelId);
+      return {
+        openChannelIds: nextOpen,
+        activeChannelId: state.activeChannelId === channelId ? nextOpen[nextOpen.length - 1] || null : state.activeChannelId,
+      };
+    }),
+  togglePinnedChannel: (channelId) =>
+    set((state) => ({
+      pinnedChannelIds: state.pinnedChannelIds.includes(channelId)
+        ? state.pinnedChannelIds.filter((id) => id !== channelId)
+        : [channelId, ...state.pinnedChannelIds].slice(0, 8),
+    })),
   updateChannel: (channelId, updates) =>
     set((state) => ({
       channels: state.channels.map((c) => (c.id === channelId ? { ...c, ...updates } : c)),

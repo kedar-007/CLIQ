@@ -40,15 +40,45 @@ channelsRouter.get('/', async (req: any, res: Response) => {
       },
       include: {
         members: {
-          where: { userId },
-          select: { role: true, notificationPreference: true, isMuted: true, lastReadAt: true },
+          select: {
+            role: true,
+            notificationPreference: true,
+            isMuted: true,
+            lastReadAt: true,
+            userId: true,
+            user: {
+              select: { id: true, name: true, avatarUrl: true, status: true },
+            },
+          },
         },
         _count: { select: { members: true } },
       },
       orderBy: { createdAt: 'asc' },
     });
 
-    res.json({ success: true, data: channels });
+    const data = channels.map((channel) => {
+      const currentMember = channel.members.find((member) => member.userId === userId);
+      const participantProfiles = ['DM', 'GROUP_DM'].includes(channel.type)
+        ? channel.members
+            .map((member) => member.user)
+            .filter(Boolean)
+        : undefined;
+
+      return {
+        ...channel,
+        members: currentMember
+          ? [{
+              role: currentMember.role,
+              notificationPreference: currentMember.notificationPreference,
+              isMuted: currentMember.isMuted,
+              lastReadAt: currentMember.lastReadAt,
+            }]
+          : [],
+        participantProfiles,
+      };
+    });
+
+    res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Failed to fetch channels' });
   }

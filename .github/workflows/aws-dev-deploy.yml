@@ -1,0 +1,156 @@
+name: AWS Dev Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/web/**"
+      - "services/**"
+      - "packages/**"
+      - "infra/helm/**"
+      - ".github/workflows/aws-dev-deploy.yml"
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REGISTRY: ${{ vars.AWS_ECR_REGISTRY }}
+  EKS_CLUSTER_NAME: ${{ vars.AWS_DEV_CLUSTER_NAME }}
+  HELM_RELEASE: comms-dev
+  K8S_NAMESPACE: comms-dev
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    environment: dev
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: web
+            dockerfile: apps/web/Dockerfile
+          - name: auth-service
+            dockerfile: services/auth-service/Dockerfile
+          - name: chat-service
+            dockerfile: services/chat-service/Dockerfile
+          - name: call-service
+            dockerfile: services/call-service/Dockerfile
+          - name: notification-service
+            dockerfile: services/notification-service/Dockerfile
+          - name: file-service
+            dockerfile: services/file-service/Dockerfile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ matrix.name }}:${{ github.sha }}
+            ${{ env.ECR_REGISTRY }}/${{ matrix.name }}:latest
+          build-args: |
+            NEXTAUTH_URL=https://${{ vars.AWS_DEV_WEB_HOST }}
+            NEXT_PUBLIC_APP_URL=https://${{ vars.AWS_DEV_WEB_HOST }}
+            NEXT_PUBLIC_WS_URL=wss://${{ vars.AWS_DEV_CHAT_HOST }}
+            CALL_SIGNALING_URL=https://${{ vars.AWS_DEV_CALL_HOST }}
+            AUTH_SERVICE_URL=http://auth-service-service:3001
+            CHAT_SERVICE_URL=http://chat-service-service:3002
+            CALL_SERVICE_URL=http://call-service-service:3003
+            NOTIFICATION_SERVICE_URL=http://notification-service-service:3004
+            FILE_SERVICE_URL=http://file-service-service:3005
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  deploy:
+    runs-on: ubuntu-latest
+    environment: dev
+    needs: build-and-push
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region "${AWS_REGION}" \
+            --name "${EKS_CLUSTER_NAME}"
+
+      - name: Ensure namespace and secrets exist
+        run: |
+          kubectl create namespace "${K8S_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic comms-app-secrets \
+            --namespace "${K8S_NAMESPACE}" \
+            --from-literal=DATABASE_URL='${{ secrets.DATABASE_URL }}' \
+            --from-literal=REDIS_URL='${{ secrets.REDIS_URL }}' \
+            --from-literal=JWT_ACCESS_SECRET='${{ secrets.JWT_ACCESS_SECRET }}' \
+            --from-literal=JWT_REFRESH_SECRET='${{ secrets.JWT_REFRESH_SECRET }}' \
+            --from-literal=S3_BUCKET='${{ vars.AWS_FILES_BUCKET }}' \
+            --from-literal=S3_REGION='${{ vars.AWS_REGION }}' \
+            --from-literal=S3_ACCESS_KEY_ID='${{ secrets.S3_ACCESS_KEY_ID }}' \
+            --from-literal=S3_SECRET_ACCESS_KEY='${{ secrets.S3_SECRET_ACCESS_KEY }}' \
+            --from-literal=CDN_BASE_URL='https://${{ vars.AWS_DEV_FILES_CDN_HOST }}' \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy Helm release
+        run: |
+          helm upgrade --install "${HELM_RELEASE}" infra/helm \
+            --namespace "${K8S_NAMESPACE}" \
+            --create-namespace \
+            -f infra/helm/values-dev.yaml \
+            --set global.imageRegistry="${ECR_REGISTRY}" \
+            --set global.imageTag="${GITHUB_SHA}" \
+            --set ingress.webHost="${{ vars.AWS_DEV_WEB_HOST }}" \
+            --set ingress.apiHost="${{ vars.AWS_DEV_API_HOST }}" \
+            --set ingress.chatHost="${{ vars.AWS_DEV_CHAT_HOST }}" \
+            --set ingress.callHost="${{ vars.AWS_DEV_CALL_HOST }}" \
+            --set ingress.tls.hosts[0]="${{ vars.AWS_DEV_WEB_HOST }}" \
+            --set ingress.tls.hosts[1]="${{ vars.AWS_DEV_API_HOST }}" \
+            --set ingress.tls.hosts[2]="${{ vars.AWS_DEV_CHAT_HOST }}" \
+            --set ingress.tls.hosts[3]="${{ vars.AWS_DEV_CALL_HOST }}" \
+            --set services.web.env.NEXTAUTH_URL="https://${{ vars.AWS_DEV_WEB_HOST }}" \
+            --set services.web.env.NEXT_PUBLIC_APP_URL="https://${{ vars.AWS_DEV_WEB_HOST }}" \
+            --set services.web.env.NEXT_PUBLIC_WS_URL="wss://${{ vars.AWS_DEV_CHAT_HOST }}" \
+            --set services.web.env.CALL_SIGNALING_URL="https://${{ vars.AWS_DEV_CALL_HOST }}"
+
+      - name: Wait for rollouts
+        run: |
+          kubectl rollout status deployment/web-service -n "${K8S_NAMESPACE}" --timeout=300s
+          kubectl rollout status deployment/auth-service -n "${K8S_NAMESPACE}" --timeout=300s
+          kubectl rollout status deployment/chat-service -n "${K8S_NAMESPACE}" --timeout=300s
+          kubectl rollout status deployment/call-service -n "${K8S_NAMESPACE}" --timeout=300s
+          kubectl rollout status deployment/notification-service -n "${K8S_NAMESPACE}" --timeout=300s
+          kubectl rollout status deployment/file-service -n "${K8S_NAMESPACE}" --timeout=300s

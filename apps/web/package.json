@@ -3,17 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3000",
+    "dev": "next dev -H 0.0.0.0 -p 3000",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -H 0.0.0.0 -p 3000",
     "lint": "next lint"
   },
   "dependencies": {
     "@comms/types": "workspace:*",
     "@comms/utils": "workspace:*",
     "@comms/ui": "workspace:*",
-    "@livekit/components-react": "^2.0.7",
-    "@livekit/components-styles": "^1.0.8",
     "@radix-ui/react-avatar": "^1.0.4",
     "@radix-ui/react-dialog": "^1.0.5",
     "@radix-ui/react-dropdown-menu": "^2.0.6",
@@ -38,7 +36,6 @@
     "date-fns": "^3.3.1",
     "emoji-mart": "^5.6.0",
     "framer-motion": "^11.0.6",
-    "livekit-client": "^2.0.7",
     "lucide-react": "^0.323.0",
     "next": "14.1.0",
     "next-themes": "^0.2.1",

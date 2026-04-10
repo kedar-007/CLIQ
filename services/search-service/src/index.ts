@@ -31,7 +31,11 @@ app.get('/health', async (_req, res) => {
 
 async function bootstrap() {
   await prisma.$connect();
-  await elasticsearchService.createIndices();
+  try {
+    await elasticsearchService.createIndices();
+  } catch (err) {
+    logger.warn('Elasticsearch unavailable during startup; search indices will be created later', { err });
+  }
   app.listen(PORT, () => logger.info(`Search service running on port ${PORT}`));
 }
 

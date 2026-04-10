@@ -21,6 +21,23 @@ variable "cluster_name" {
   default     = "comms-cluster"
 }
 
+variable "availability_zone_count" {
+  description = "Number of AZs to span for the VPC and cluster subnets"
+  type        = number
+  default     = 3
+
+  validation {
+    condition     = contains([2, 3], var.availability_zone_count)
+    error_message = "availability_zone_count must be 2 or 3."
+  }
+}
+
+variable "single_nat_gateway" {
+  description = "Whether to create a single shared NAT gateway for all private subnets"
+  type        = bool
+  default     = false
+}
+
 variable "db_password" {
   description = "Master password for the RDS PostgreSQL instance"
   type        = string
@@ -85,10 +102,58 @@ variable "rds_allocated_storage" {
   default     = 100
 }
 
+variable "rds_multi_az" {
+  description = "Whether the RDS instance should be Multi-AZ"
+  type        = bool
+  default     = true
+}
+
+variable "rds_deletion_protection" {
+  description = "Whether deletion protection is enabled for RDS"
+  type        = bool
+  default     = true
+}
+
+variable "rds_skip_final_snapshot" {
+  description = "Whether to skip the final RDS snapshot on destroy"
+  type        = bool
+  default     = false
+}
+
+variable "rds_backup_retention_period" {
+  description = "Number of days to retain automated RDS backups"
+  type        = number
+  default     = 7
+}
+
+variable "enable_rds_performance_insights" {
+  description = "Whether to enable RDS Performance Insights"
+  type        = bool
+  default     = true
+}
+
 variable "redis_node_type" {
   description = "ElastiCache Redis node type"
   type        = string
   default     = "cache.t3.medium"
+}
+
+variable "redis_num_cache_clusters" {
+  description = "Number of cache nodes in the replication group"
+  type        = number
+  default     = 2
+}
+
+variable "redis_multi_az_enabled" {
+  description = "Whether to enable Multi-AZ for ElastiCache"
+  type        = bool
+  default     = true
+}
+
+variable "redis_automatic_failover_enabled" {
+  description = "Whether automatic failover is enabled for ElastiCache"
+  type        = bool
+  default     = true
 }
 
 variable "tags" {

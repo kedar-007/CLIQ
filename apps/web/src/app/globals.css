@@ -4,76 +4,74 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 224 71.4% 4.1%;
+    --background: 205 33% 98%;
+    --foreground: 215 42% 12%;
     --card: 0 0% 100%;
-    --card-foreground: 224 71.4% 4.1%;
+    --card-foreground: 215 42% 12%;
     --popover: 0 0% 100%;
-    --popover-foreground: 224 71.4% 4.1%;
-    --primary: 262.1 83.3% 57.8%;
+    --popover-foreground: 215 42% 12%;
+    --primary: 193 88% 42%;
     --primary-foreground: 210 20% 98%;
-    --secondary: 220 14.3% 95.9%;
-    --secondary-foreground: 220.9 39.3% 11%;
-    --muted: 220 14.3% 95.9%;
-    --muted-foreground: 220 8.9% 46.1%;
-    --accent: 220 14.3% 95.9%;
-    --accent-foreground: 220.9 39.3% 11%;
+    --secondary: 200 28% 94%;
+    --secondary-foreground: 215 38% 18%;
+    --muted: 200 28% 94%;
+    --muted-foreground: 215 14% 42%;
+    --accent: 190 30% 92%;
+    --accent-foreground: 215 38% 18%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 20% 98%;
-    --border: 220 13% 91%;
-    --input: 220 13% 91%;
-    --ring: 262.1 83.3% 57.8%;
-    --radius: 0.5rem;
+    --border: 202 24% 88%;
+    --input: 202 24% 88%;
+    --ring: 193 88% 42%;
+    --radius: 1rem;
 
-    /* Sidebar - dark purple like Teams */
-    --sidebar-background: 246 53% 17%;
-    --sidebar-foreground: 240 10% 90%;
-    --sidebar-primary: 262.1 83.3% 65%;
+    --sidebar-background: 205 44% 14%;
+    --sidebar-foreground: 200 20% 92%;
+    --sidebar-primary: 193 88% 42%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 246 40% 23%;
-    --sidebar-accent-foreground: 240 10% 95%;
-    --sidebar-border: 246 40% 22%;
-    --sidebar-ring: 262.1 83.3% 57.8%;
+    --sidebar-accent: 201 39% 19%;
+    --sidebar-accent-foreground: 200 20% 95%;
+    --sidebar-border: 201 35% 20%;
+    --sidebar-ring: 193 88% 42%;
 
-    /* Nav rail - darker */
-    --nav-background: 246 62% 12%;
-    --nav-foreground: 240 10% 75%;
-    --nav-active: 262.1 83.3% 65%;
+    --nav-background: 205 55% 10%;
+    --nav-foreground: 200 10% 75%;
+    --nav-active: 193 88% 42%;
   }
 
   .dark {
-    --background: 224 71.4% 4.1%;
+    --background: 210 44% 8%;
     --foreground: 210 20% 98%;
-    --card: 224 71.4% 4.1%;
+    --card: 211 42% 10%;
     --card-foreground: 210 20% 98%;
-    --popover: 220 22% 9%;
+    --popover: 211 42% 10%;
     --popover-foreground: 210 20% 98%;
-    --primary: 262.1 83.3% 65%;
+    --primary: 190 95% 46%;
     --primary-foreground: 210 20% 98%;
-    --secondary: 215 27.9% 16.9%;
+    --secondary: 210 26% 17%;
     --secondary-foreground: 210 20% 98%;
-    --muted: 215 27.9% 16.9%;
-    --muted-foreground: 217.9 10.6% 64.9%;
-    --accent: 215 27.9% 16.9%;
+    --muted: 210 26% 17%;
+    --muted-foreground: 210 14% 66%;
+    --accent: 210 26% 17%;
     --accent-foreground: 210 20% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 20% 98%;
-    --border: 215 27.9% 16.9%;
-    --input: 215 27.9% 16.9%;
-    --ring: 262.1 83.3% 57.8%;
+    --border: 210 26% 17%;
+    --input: 210 26% 17%;
+    --ring: 190 95% 46%;
 
-    --sidebar-background: 246 53% 12%;
-    --sidebar-foreground: 240 10% 85%;
-    --sidebar-primary: 262.1 83.3% 65%;
+    --sidebar-background: 205 48% 11%;
+    --sidebar-foreground: 200 12% 88%;
+    --sidebar-primary: 190 95% 46%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 246 40% 18%;
-    --sidebar-accent-foreground: 240 10% 95%;
-    --sidebar-border: 246 40% 16%;
-    --sidebar-ring: 262.1 83.3% 57.8%;
+    --sidebar-accent: 201 34% 16%;
+    --sidebar-accent-foreground: 200 20% 95%;
+    --sidebar-border: 203 34% 16%;
+    --sidebar-ring: 190 95% 46%;
 
-    --nav-background: 246 62% 8%;
-    --nav-foreground: 240 10% 70%;
-    --nav-active: 262.1 83.3% 65%;
+    --nav-background: 205 55% 8%;
+    --nav-foreground: 200 10% 70%;
+    --nav-active: 190 95% 46%;
   }
 }
 
@@ -84,6 +82,16 @@
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
+    font-family: "Plus Jakarta Sans", "Segoe UI Variable Text", "Segoe UI", sans-serif;
+    background-image:
+      radial-gradient(circle at top, rgba(34, 211, 238, 0.08), transparent 28%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
+  }
+
+  .dark body {
+    background-image:
+      radial-gradient(circle at top, rgba(56, 189, 248, 0.12), transparent 24%),
+      linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(2, 6, 23, 1));
   }
 }
 
@@ -179,3 +187,15 @@
 /* Sidebar channel item hover */
 .sidebar-channel-item:hover { background: hsl(var(--sidebar-accent)) !important; }
 .sidebar-channel-item { transition: background 0.1s; }
+
+.conversation-surface {
+  background-image:
+    radial-gradient(circle at top, rgba(34, 211, 238, 0.12), transparent 26%),
+    linear-gradient(180deg, rgba(255,255,255,0.55), rgba(255,255,255,0.2));
+}
+
+.dark .conversation-surface {
+  background-image:
+    radial-gradient(circle at top, rgba(56, 189, 248, 0.12), transparent 22%),
+    linear-gradient(180deg, rgba(15,23,42,0.55), rgba(15,23,42,0.25));
+}

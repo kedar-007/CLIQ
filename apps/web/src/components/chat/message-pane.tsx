@@ -10,26 +10,21 @@ import { MembersPanel } from './members-panel';
 import { InviteModal } from './invite-modal';
 import { CallOverlay } from './call-overlay';
 import { fetchApi, cn } from '@/lib/utils';
-import type { Message } from '@comms/types';
+import type { CallJoinConfig, Message } from '@comms/types';
 import {
   Hash, Loader2, Users, Search, Phone, Video,
-  Pin, Info, Lock, AtSign
+  Pin, Info, Lock, AtSign, X
 } from 'lucide-react';
-
-interface CallSession {
-  callSessionId: string;
-  roomName: string;
-  token: string;
-  livekitUrl: string;
-  callType: 'AUDIO' | 'VIDEO';
-}
 
 interface MessagePaneProps {
   channelId: string;
+  isFocused?: boolean;
+  onFocus?: () => void;
+  onClose?: () => void;
 }
 
-export function MessagePane({ channelId }: MessagePaneProps) {
-  const { messages, setMessages, prependMessages, channels, clearUnread, typingUsers } = useChatStore();
+export function MessagePane({ channelId, isFocused = false, onFocus, onClose }: MessagePaneProps) {
+  const { messages, setMessages, prependMessages, channels, clearUnread, typingUsers, pinnedChannelIds, togglePinnedChannel } = useChatStore();
   const { user } = useAuthStore();
   const { members } = useWorkspaceStore();
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -40,7 +35,7 @@ export function MessagePane({ channelId }: MessagePaneProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
-  const [activeCall, setActiveCall] = useState<CallSession | null>(null);
+  const [activeCall, setActiveCall] = useState<CallJoinConfig | null>(null);
   const [callStarting, setCallStarting] = useState(false);
 
   const channel = channels.find(c => c.id === channelId);
@@ -54,27 +49,36 @@ export function MessagePane({ channelId }: MessagePaneProps) {
 
   // For DM channels, find the other person's name/avatar
   const dmOtherMember = isDm ? (() => {
+    const participantProfiles = channel?.participantProfiles || [];
+    const otherParticipant = participantProfiles.find((participant) => participant.id !== user?.id);
+    if (otherParticipant) return otherParticipant;
+
     if (!channel?.name) return null;
-    // DM channel names look like "dm-userId1-userId2"
     const parts = channel.name.split('-');
     const otherId = parts.find((p: string) => p !== 'dm' && p !== user?.id);
     if (!otherId) return null;
     return members.find(m => m.id === otherId) || null;
   })() : null;
 
-  const displayName = isDm && dmOtherMember ? dmOtherMember.name : channel?.name;
-  const displayInitials = dmOtherMember?.name?.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
+  const dmDisplayName = dmOtherMember?.name?.trim() || dmOtherMember?.email?.split('@')[0] || null;
+  const displayName = isDm && dmOtherMember ? dmDisplayName : channel?.name;
+  const displayInitials = dmDisplayName?.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
+  const introTitle = isDm ? displayName : `# ${displayName || channel?.name || 'channel'}`;
+  const introText = isDm
+    ? `This is the beginning of your conversation with ${displayName || 'this teammate'}.`
+    : `This is the beginning of the #${displayName || channel?.name} channel.`;
+  const isPinned = pinnedChannelIds.includes(channelId);
 
   const startCall = async (type: 'AUDIO' | 'VIDEO') => {
     if (callStarting || activeCall) return;
     setCallStarting(true);
     try {
-      const res = await fetchApi<{ success: boolean; data: { callSessionId: string; roomName: string; token: string; livekitUrl: string } }>(
+      const res = await fetchApi<{ success: boolean; data: CallJoinConfig }>(
         '/api/calls/start',
         { method: 'POST', body: JSON.stringify({ channelId, type }) }
       );
       if (res.success && res.data) {
-        setActiveCall({ ...res.data, callType: type });
+        setActiveCall(res.data);
       }
     } catch {
       // silent fail — call couldn't be started
@@ -146,17 +150,23 @@ export function MessagePane({ channelId }: MessagePaneProps) {
   });
 
   return (
-    <div className="flex flex-1 min-w-0 h-full bg-background overflow-hidden">
+    <div
+      className={cn(
+        'flex min-w-0 h-full overflow-hidden rounded-[24px] border bg-background transition-all',
+        isFocused ? 'border-cyan-400/35 shadow-[0_18px_45px_rgba(34,211,238,0.14)]' : 'border-border/70'
+      )}
+      onClick={onFocus}
+    >
     <div className="flex flex-col flex-1 min-w-0 h-full bg-background">
       {/* Channel Header */}
-      <div className="h-14 border-b border-border flex items-center px-4 gap-3 flex-shrink-0 bg-card/30">
+      <div className="h-14 border-b border-border flex items-center px-4 gap-3 flex-shrink-0 bg-card/50 backdrop-blur">
         <div className="flex items-center gap-2 flex-1 min-w-0">
           {isDm && dmOtherMember ? (
             <div className="relative flex-shrink-0">
               {dmOtherMember.avatarUrl
                 ? <img src={dmOtherMember.avatarUrl} alt={dmOtherMember.name} className="w-8 h-8 rounded-full object-cover" />
                 : (
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white text-xs font-semibold">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[linear-gradient(135deg,#06b6d4,#0f766e)] text-xs font-semibold text-white">
                     {displayInitials}
                   </div>
                 )
@@ -194,7 +204,14 @@ export function MessagePane({ channelId }: MessagePaneProps) {
           <button className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors" title="Search in channel">
             <Search size={16} />
           </button>
-          <button className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors" title="Pinned messages">
+          <button
+            onClick={() => togglePinnedChannel(channelId)}
+            className={cn(
+              'p-2 rounded-lg transition-colors',
+              isPinned ? 'bg-amber-500/12 text-amber-500 hover:bg-amber-500/18' : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+            )}
+            title={isPinned ? 'Unpin conversation' : 'Pin conversation'}
+          >
             <Pin size={16} />
           </button>
           <button
@@ -207,6 +224,18 @@ export function MessagePane({ channelId }: MessagePaneProps) {
           <button className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors" title="Channel info">
             <Info size={16} />
           </button>
+          {onClose && (
+            <button
+              onClick={(event) => {
+                event.stopPropagation();
+                onClose();
+              }}
+              className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+              title="Close chat"
+            >
+              <X size={16} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -229,12 +258,12 @@ export function MessagePane({ channelId }: MessagePaneProps) {
                 <Icon size={22} className="text-primary" />
               </div>
               <div>
-                <h3 className="font-bold text-lg"># {channel?.name}</h3>
+                <h3 className="font-bold text-lg">{introTitle}</h3>
                 {channel?.description && (
                   <p className="text-sm text-muted-foreground">{channel.description}</p>
                 )}
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  This is the beginning of the #{channel?.name} channel.
+                  {introText}
                 </p>
               </div>
             </div>
@@ -309,7 +338,11 @@ export function MessagePane({ channelId }: MessagePaneProps) {
       </div>
 
       {/* Composer */}
-      <MessageComposer channelId={channelId} channelName={channel?.name} />
+            <MessageComposer
+              channelId={channelId}
+              channelName={displayName || channel?.name}
+              isDirectMessage={isDm}
+            />
     </div>
 
     {/* Members Panel */}
@@ -328,10 +361,7 @@ export function MessagePane({ channelId }: MessagePaneProps) {
     {/* Call Overlay */}
     {activeCall && (
       <CallOverlay
-        roomName={activeCall.roomName}
-        token={activeCall.token}
-        livekitUrl={activeCall.livekitUrl}
-        callType={activeCall.callType}
+        config={activeCall}
         onLeave={() => setActiveCall(null)}
         participants={dmOtherMember ? [{ name: dmOtherMember.name, avatarUrl: dmOtherMember.avatarUrl }] : []}
       />

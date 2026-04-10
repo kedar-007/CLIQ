@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useForm } from 'react-hook-form';
@@ -16,13 +17,25 @@ interface LoginForm {
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login } = useAuthStore();
+  const { login, isAuthenticated, hasHydrated, bootstrapSession, user } = useAuthStore();
   const [showPassword, setShowPassword] = useState(false);
   const [requiresMfa, setRequiresMfa] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
   const { register, handleSubmit, formState: { errors } } = useForm<LoginForm>();
+
+  useEffect(() => {
+    if (hasHydrated && !isAuthenticated) {
+      void bootstrapSession();
+    }
+  }, [bootstrapSession, hasHydrated, isAuthenticated]);
+
+  useEffect(() => {
+    if (hasHydrated && isAuthenticated) {
+      router.replace(user?.mustChangePassword ? '/settings?force=password-reset' : '/chat');
+    }
+  }, [hasHydrated, isAuthenticated, router, user?.mustChangePassword]);
 
   const onSubmit = async (data: LoginForm) => {
     setIsLoading(true);
@@ -40,7 +53,7 @@ export default function LoginPage() {
       if (!json.success) { setError(json.error || 'Login failed'); return; }
 
       login(json.data.user, json.data.accessToken);
-      router.push('/chat');
+      router.push(json.data.user?.mustChangePassword ? '/settings?force=password-reset' : '/chat');
     } catch {
       setError('Network error. Please try again.');
     } finally {

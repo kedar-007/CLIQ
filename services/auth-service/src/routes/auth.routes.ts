@@ -224,6 +224,7 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
           name: user.name,
           role: user.role,
           avatarUrl: user.avatarUrl,
+          mustChangePassword: user.mustChangePassword,
           tenantId: user.tenantId,
           tenant: {
             id: user.tenant.id,
@@ -304,6 +305,80 @@ authRouter.get('/me', verifyAccessTokenMiddleware, async (req: AuthRequest, res:
   } catch (err: any) {
     logger.error('Me error', { err: err?.message });
     res.status(500).json({ success: false, error: 'Failed to fetch user' });
+  }
+});
+
+authRouter.patch('/me', verifyAccessTokenMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const body = z.object({
+      name: z.string().min(1).max(100).optional(),
+      avatarUrl: z.string().url().or(z.literal('')).optional(),
+      phoneNumber: z.string().max(30).optional(),
+      department: z.string().max(100).optional(),
+      jobTitle: z.string().max(100).optional(),
+      timezone: z.string().max(100).optional(),
+      locale: z.string().max(20).optional(),
+    }).parse(req.body);
+
+    const updatedUser = await prisma.user.update({
+      where: { id: req.user!.sub },
+      data: {
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.avatarUrl !== undefined ? { avatarUrl: body.avatarUrl || null } : {}),
+        ...(body.phoneNumber !== undefined ? { phoneNumber: body.phoneNumber || null } : {}),
+        ...(body.department !== undefined ? { department: body.department || null } : {}),
+        ...(body.jobTitle !== undefined ? { jobTitle: body.jobTitle || null } : {}),
+        ...(body.timezone !== undefined ? { timezone: body.timezone || 'UTC' } : {}),
+        ...(body.locale !== undefined ? { locale: body.locale || 'en' } : {}),
+      },
+      include: { tenant: true },
+    });
+
+    const { passwordHash, mfaSecret, emailVerificationToken, ...safeUser } = updatedUser;
+    res.json({ success: true, data: safeUser });
+  } catch (err: any) {
+    logger.error('Update profile error', { err: err?.message, stack: err?.stack });
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ success: false, error: 'Validation failed', details: err.flatten() });
+      return;
+    }
+    res.status(500).json({ success: false, error: 'Failed to update profile' });
+  }
+});
+
+authRouter.post('/change-password', verifyAccessTokenMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { currentPassword, newPassword } = z.object({
+      currentPassword: z.string().min(1),
+      newPassword: z.string().min(8).max(100),
+    }).parse(req.body);
+
+    const user = await prisma.user.findUnique({ where: { id: req.user!.sub } });
+    if (!user?.passwordHash) {
+      res.status(400).json({ success: false, error: 'Password login is not enabled for this account' });
+      return;
+    }
+
+    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!isCurrentPasswordValid) {
+      res.status(401).json({ success: false, error: 'Current password is incorrect' });
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash, mustChangePassword: false },
+    });
+
+    res.json({ success: true, message: 'Password updated successfully' });
+  } catch (err: any) {
+    logger.error('Change password error', { err: err?.message, stack: err?.stack });
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ success: false, error: 'Validation failed', details: err.flatten() });
+      return;
+    }
+    res.status(500).json({ success: false, error: 'Failed to change password' });
   }
 });
 
@@ -463,23 +538,56 @@ authRouter.post('/workspace/members/invite', verifyAccessTokenMiddleware, async 
     }).parse(req.body);
 
     const tenantId = req.user!.tenantId;
+    const tempPassword = Math.random().toString(36).slice(-12) + 'A1!';
+    const passwordHash = await bcrypt.hash(tempPassword, 12);
 
     // Check if user already exists in this tenant
     const existing = await prisma.user.findFirst({ where: { email, tenantId } });
     if (existing) {
-      res.status(409).json({ success: false, error: 'User already in workspace' });
+      if (!existing.isDeactivated) {
+        res.status(409).json({ success: false, error: 'User already in workspace' });
+        return;
+      }
+
+      const user = await prisma.user.update({
+        where: { id: existing.id },
+        data: {
+          name,
+          passwordHash,
+          mustChangePassword: true,
+          role: role as any || 'MEMBER',
+          isDeactivated: false,
+          status: 'OFFLINE',
+          lastSeen: null,
+        },
+      });
+
+      const defaultChannels = await prisma.channel.findMany({
+        where: { tenantId, isDefault: true, isArchived: false },
+      });
+
+      for (const ch of defaultChannels) {
+        await prisma.channelMember.upsert({
+          where: { channelId_userId: { channelId: ch.id, userId: user.id } },
+          create: { channelId: ch.id, userId: user.id, role: 'MEMBER' },
+          update: {},
+        }).catch(() => {});
+      }
+
+      res.json({
+        success: true,
+        data: { id: user.id, email: user.email, name: user.name, role: user.role, tempPassword, reactivated: true },
+      });
       return;
     }
 
     // Create invited user with temporary password
-    const tempPassword = Math.random().toString(36).slice(-12) + 'A1!';
-    const passwordHash = await bcrypt.hash(tempPassword, 12);
-
     const user = await prisma.user.create({
       data: {
         email,
         name,
         passwordHash,
+        mustChangePassword: true,
         role: role as any || 'MEMBER',
         tenantId,
         userPreference: { create: {} },
@@ -520,9 +628,19 @@ authRouter.delete('/workspace/members/:userId', verifyAccessTokenMiddleware, asy
       res.status(400).json({ success: false, error: 'Cannot remove yourself' });
       return;
     }
-    await prisma.user.update({
+    const member = await prisma.user.findFirst({
       where: { id: userId, tenantId: req.user!.tenantId },
-      data: { isDeactivated: true },
+      select: { id: true },
+    });
+
+    if (!member) {
+      res.status(404).json({ success: false, error: 'Member not found' });
+      return;
+    }
+
+    await prisma.user.update({
+      where: { id: member.id },
+      data: { isDeactivated: true, status: 'OFFLINE', lastSeen: null },
     });
     res.json({ success: true });
   } catch {

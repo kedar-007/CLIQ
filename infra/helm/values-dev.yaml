@@ -1,0 +1,65 @@
+global:
+  env: dev
+  imageTag: latest
+
+services:
+  web:
+    replicaCount: 1
+    env:
+      NODE_ENV: production
+      HOST: "0.0.0.0"
+      NEXTAUTH_URL: "https://app.dev.example.com"
+      NEXT_PUBLIC_APP_URL: "https://app.dev.example.com"
+      NEXT_PUBLIC_WS_URL: "wss://chat.dev.example.com"
+      CALL_SIGNALING_URL: "https://call.dev.example.com"
+      AUTH_SERVICE_URL: "http://auth-service-service:3001"
+      CHAT_SERVICE_URL: "http://chat-service-service:3002"
+      CALL_SERVICE_URL: "http://call-service-service:3003"
+      NOTIFICATION_SERVICE_URL: "http://notification-service-service:3004"
+      FILE_SERVICE_URL: "http://file-service-service:3005"
+  auth:
+    replicaCount: 1
+  chat:
+    replicaCount: 1
+  call:
+    replicaCount: 1
+  notification:
+    replicaCount: 1
+  file:
+    replicaCount: 1
+  search:
+    enabled: false
+  calendar:
+    enabled: false
+  task:
+    enabled: false
+  bot:
+    enabled: false
+  integration:
+    enabled: false
+  ai:
+    enabled: false
+  analytics:
+    enabled: false
+  billing:
+    enabled: false
+
+ingress:
+  enabled: true
+  className: nginx
+  webHost: app.dev.example.com
+  apiHost: api.dev.example.com
+  chatHost: chat.dev.example.com
+  callHost: call.dev.example.com
+  tls:
+    enabled: true
+    secretName: comms-dev-tls
+    hosts:
+      - app.dev.example.com
+      - api.dev.example.com
+      - chat.dev.example.com
+      - call.dev.example.com
+
+sharedEnvFrom:
+  - secretRef:
+      name: comms-app-secrets

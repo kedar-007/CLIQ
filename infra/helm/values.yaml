@@ -7,11 +7,29 @@ global:
 
 # Service configurations
 services:
+  web:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: web
+      tag: ""
+    service:
+      port: 3000
+      healthPath: /login
+    resources:
+      limits:
+        cpu: 500m
+        memory: 768Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+    env: {}
+
   auth:
     enabled: true
     replicaCount: 2
     image:
-      repository: comms/auth-service
+      repository: auth-service
       tag: ""
     service:
       port: 3001
@@ -28,7 +46,7 @@ services:
     enabled: true
     replicaCount: 3
     image:
-      repository: comms/chat-service
+      repository: chat-service
       tag: ""
     service:
       port: 3002
@@ -45,7 +63,7 @@ services:
     enabled: true
     replicaCount: 2
     image:
-      repository: comms/call-service
+      repository: call-service
       tag: ""
     service:
       port: 3003
@@ -62,7 +80,7 @@ services:
     enabled: true
     replicaCount: 2
     image:
-      repository: comms/notification-service
+      repository: notification-service
       tag: ""
     service:
       port: 3004
@@ -79,7 +97,7 @@ services:
     enabled: true
     replicaCount: 2
     image:
-      repository: comms/file-service
+      repository: file-service
       tag: ""
     service:
       port: 3005
@@ -96,7 +114,7 @@ services:
     enabled: true
     replicaCount: 2
     image:
-      repository: comms/search-service
+      repository: search-service
       tag: ""
     service:
       port: 3006
@@ -113,7 +131,7 @@ services:
     enabled: true
     replicaCount: 1
     image:
-      repository: comms/calendar-service
+      repository: calendar-service
       tag: ""
     service:
       port: 3007
@@ -130,7 +148,7 @@ services:
     enabled: true
     replicaCount: 2
     image:
-      repository: comms/task-service
+      repository: task-service
       tag: ""
     service:
       port: 3008
@@ -147,7 +165,7 @@ services:
     enabled: true
     replicaCount: 1
     image:
-      repository: comms/bot-service
+      repository: bot-service
       tag: ""
     service:
       port: 3009
@@ -164,7 +182,7 @@ services:
     enabled: true
     replicaCount: 1
     image:
-      repository: comms/integration-service
+      repository: integration-service
       tag: ""
     service:
       port: 3010
@@ -181,7 +199,7 @@ services:
     enabled: true
     replicaCount: 2
     image:
-      repository: comms/ai-service
+      repository: ai-service
       tag: ""
     service:
       port: 3011
@@ -198,7 +216,7 @@ services:
     enabled: true
     replicaCount: 1
     image:
-      repository: comms/analytics-service
+      repository: analytics-service
       tag: ""
     service:
       port: 3012
@@ -215,7 +233,7 @@ services:
     enabled: true
     replicaCount: 1
     image:
-      repository: comms/billing-service
+      repository: billing-service
       tag: ""
     service:
       port: 3013
@@ -231,10 +249,19 @@ services:
 ingress:
   enabled: true
   className: nginx
-  host: api.dsvcliq.com
+  annotations: {}
+  webHost: app.dsvcliq.com
+  apiHost: api.dsvcliq.com
+  chatHost: chat.dsvcliq.com
+  callHost: call.dsvcliq.com
   tls:
     enabled: true
     secretName: comms-tls
+    hosts:
+      - app.dsvcliq.com
+      - api.dsvcliq.com
+      - chat.dsvcliq.com
+      - call.dsvcliq.com
 
 # Shared environment (from secrets/configmap)
 sharedEnvFrom:

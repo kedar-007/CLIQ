@@ -1,0 +1,18 @@
+{
+  local_certs
+  admin off
+}
+
+https://app.{env.LOCAL_DEV_DOMAIN} {
+  handle /socket.io-chat* {
+    uri replace /socket.io-chat /socket.io
+    reverse_proxy host.docker.internal:3002
+  }
+
+  handle /socket.io-call* {
+    uri replace /socket.io-call /socket.io
+    reverse_proxy host.docker.internal:3003
+  }
+
+  reverse_proxy host.docker.internal:3000
+}

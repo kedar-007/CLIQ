@@ -48,3 +48,6 @@ packages/db/node_modules/
 
 # Generated
 packages/db/src/generated/
+
+# Local proxy data
+.local/

@@ -50,14 +50,14 @@ echo "✅ Prisma client generated"
 
 # Start infrastructure
 echo "🐳 Starting Docker infrastructure..."
-docker compose up -d
+docker compose up -d postgres redis kafka kafka-ui minio minio-setup mailhog clamav redis-commander elasticsearch
 
 echo "⏳ Waiting for services to be healthy..."
 sleep 10
 
 # Wait for PostgreSQL
 echo -n "  PostgreSQL..."
-until docker compose exec -T postgres pg_isready -U comms &>/dev/null; do
+until docker compose exec -T postgres pg_isready -U postgres -d comms_platform &>/dev/null; do
   sleep 2
   echo -n "."
 done
@@ -71,11 +71,11 @@ until docker compose exec -T redis redis-cli ping &>/dev/null; do
 done
 echo " ✅"
 
-# Run database migrations
-echo "🗃️  Running database migrations..."
+# Apply database schema
+echo "🗃️  Applying database schema..."
 pnpm db:migrate
 
-echo "✅ Database migrations applied"
+echo "✅ Database schema applied"
 
 echo ""
 echo "✅ Setup complete!"

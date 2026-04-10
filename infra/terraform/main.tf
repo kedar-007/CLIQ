@@ -39,13 +39,16 @@ provider "aws" {
 locals {
   name_prefix = "comms-${var.environment}"
 
-  availability_zones = [
+  all_availability_zones = [
     "${var.aws_region}a",
     "${var.aws_region}b",
     "${var.aws_region}c",
   ]
 
+  availability_zones = slice(local.all_availability_zones, 0, var.availability_zone_count)
+
   service_names = [
+    "web",
     "auth-service",
     "chat-service",
     "call-service",
@@ -111,7 +114,7 @@ resource "aws_subnet" "private" {
 }
 
 resource "aws_eip" "nat" {
-  count  = length(local.availability_zones)
+  count  = var.single_nat_gateway ? 1 : length(local.availability_zones)
   domain = "vpc"
 
   tags = {
@@ -120,13 +123,13 @@ resource "aws_eip" "nat" {
 }
 
 resource "aws_nat_gateway" "main" {
-  count = length(local.availability_zones)
+  count = var.single_nat_gateway ? 1 : length(local.availability_zones)
 
   allocation_id = aws_eip.nat[count.index].id
   subnet_id     = aws_subnet.public[count.index].id
 
   tags = {
-    Name = "${local.name_prefix}-nat-${local.availability_zones[count.index]}"
+    Name = "${local.name_prefix}-nat-${var.single_nat_gateway ? "shared" : local.availability_zones[count.index]}"
   }
 
   depends_on = [aws_internet_gateway.main]
@@ -158,7 +161,7 @@ resource "aws_route_table" "private" {
 
   route {
     cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.main[count.index].id
+    nat_gateway_id = aws_nat_gateway.main[var.single_nat_gateway ? 0 : count.index].id
   }
 
   tags = {
@@ -392,17 +395,17 @@ resource "aws_db_instance" "main" {
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
 
-  multi_az               = true
+  multi_az               = var.rds_multi_az
   publicly_accessible    = false
-  deletion_protection    = true
-  skip_final_snapshot    = false
-  final_snapshot_identifier = "${local.name_prefix}-postgres-final-snapshot"
+  deletion_protection    = var.rds_deletion_protection
+  skip_final_snapshot    = var.rds_skip_final_snapshot
+  final_snapshot_identifier = var.rds_skip_final_snapshot ? null : "${local.name_prefix}-postgres-final-snapshot"
 
-  backup_retention_period = 7
+  backup_retention_period = var.rds_backup_retention_period
   backup_window           = "03:00-04:00"
   maintenance_window      = "sun:04:00-sun:05:00"
 
-  performance_insights_enabled          = true
+  performance_insights_enabled          = var.enable_rds_performance_insights
   performance_insights_retention_period = 7
 
   enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
@@ -434,9 +437,9 @@ resource "aws_elasticache_replication_group" "main" {
   parameter_group_name = "default.redis7"
   port                 = 6379
 
-  num_cache_clusters = 2  # 1 primary + 1 replica
-  automatic_failover_enabled = true
-  multi_az_enabled           = true
+  num_cache_clusters         = var.redis_num_cache_clusters
+  automatic_failover_enabled = var.redis_automatic_failover_enabled
+  multi_az_enabled           = var.redis_multi_az_enabled
 
   subnet_group_name  = aws_elasticache_subnet_group.main.name
   security_group_ids = [aws_security_group.elasticache.id]

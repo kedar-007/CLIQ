@@ -5,7 +5,7 @@ import { Queue } from 'bullmq';
 import { z } from 'zod';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
-import { generatePresignedUploadUrl, generatePresignedDownloadUrl, deleteObject } from '../services/storage.service';
+import { generatePresignedUploadUrl, generatePresignedDownloadUrl, deleteObject, buildPublicUrl } from '../services/storage.service';
 import { createLogger } from '@comms/logger';
 import type { JWTPayload } from '@comms/types';
 
@@ -18,6 +18,93 @@ function auth(req: any, res: Response, next: () => void): void {
   try { req.user = jwt.verify(token, process.env.JWT_ACCESS_SECRET!) as JWTPayload; next(); }
   catch { res.status(401).json({ success: false, error: 'Invalid token' }); }
 }
+
+filesRouter.post('/avatar/presign', auth, async (req: any, res: Response) => {
+  try {
+    const { fileName, mimeType, fileSize } = z.object({
+      fileName: z.string().min(1),
+      mimeType: z.string().startsWith('image/'),
+      fileSize: z.number().positive().max(10 * 1024 * 1024),
+    }).parse(req.body);
+
+    const fileId = uuidv4();
+    const ext = fileName.split('.').pop() || 'png';
+    const fileKey = `avatars/${req.user.tenantId}/${req.user.sub}/${fileId}.${ext}`;
+    const uploadUrl = await generatePresignedUploadUrl({ fileKey, mimeType, fileSize });
+
+    await redis.setex(`pending_avatar:${fileId}`, 1800, JSON.stringify({
+      fileId,
+      fileKey,
+      fileName,
+      mimeType,
+      fileSize,
+      userId: req.user.sub,
+      tenantId: req.user.tenantId,
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        uploadUrl,
+        fileId,
+        fileKey,
+        expiresAt: new Date(Date.now() + 3600000),
+      },
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ success: false, error: 'Validation failed', details: err.flatten() });
+      return;
+    }
+    logger.error('Avatar presign error', { err });
+    res.status(500).json({ success: false, error: 'Failed to prepare avatar upload' });
+  }
+});
+
+filesRouter.post('/avatar/confirm', auth, async (req: any, res: Response) => {
+  try {
+    const { fileId } = z.object({ fileId: z.string() }).parse(req.body);
+    const metaJson = await redis.get(`pending_avatar:${fileId}`);
+    if (!metaJson) {
+      res.status(400).json({ success: false, error: 'Avatar upload not found or expired' });
+      return;
+    }
+
+    const meta = JSON.parse(metaJson);
+    await redis.del(`pending_avatar:${fileId}`);
+
+    const avatarUrl = buildPublicUrl(meta.fileKey);
+    const user = await prisma.user.update({
+      where: { id: req.user.sub },
+      data: { avatarUrl },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        avatarUrl: true,
+        mustChangePassword: true,
+        phoneNumber: true,
+        department: true,
+        jobTitle: true,
+        timezone: true,
+        locale: true,
+        tenantId: true,
+        role: true,
+        status: true,
+      },
+    });
+
+    res.json({ success: true, data: user });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ success: false, error: 'Validation failed', details: err.flatten() });
+      return;
+    }
+    logger.error('Avatar confirm error', { err });
+    res.status(500).json({ success: false, error: 'Failed to save avatar' });
+  }
+});
+
 filesRouter.use(auth);
 
 // POST /files/presign — generate S3 presigned PUT URL

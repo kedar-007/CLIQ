@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Sidebar } from './sidebar';
 import { MessagePane } from './message-pane';
 import { ThreadPanel } from './thread-panel';
@@ -17,15 +18,17 @@ interface ChatLayoutProps {
 }
 
 export function ChatLayout({ channelId: initialChannelId }: ChatLayoutProps) {
+  const queryClient = useQueryClient();
   const { accessToken } = useAuthStore();
   const { connect, socket } = useSocketStore();
   const {
     channels, setChannels, addMessage, updateMessage, deleteMessage,
     setTypingUser, activeChannelId, setActiveChannel, activeThreadMessageId,
-    updateMessageReactions, unreadCounts, setUnreadCount,
+    updateMessageReactions, unreadCounts, setUnreadCount, openChannelIds, closeChannel,
   } = useChatStore();
   const { updatePresence } = usePresenceStore();
   const { setMembers } = useWorkspaceStore();
+  const messageAudioContextRef = useRef<AudioContext | null>(null);
 
   // Set initial channel from URL
   useEffect(() => {
@@ -68,6 +71,32 @@ export function ChatLayout({ channelId: initialChannelId }: ChatLayoutProps) {
   useEffect(() => {
     if (!socket) return;
 
+    const playMessageTone = async () => {
+      try {
+        const AudioCtx = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!AudioCtx) return;
+        if (!messageAudioContextRef.current) {
+          messageAudioContextRef.current = new AudioCtx();
+        }
+        const ctx = messageAudioContextRef.current;
+        if (ctx.state === 'suspended') {
+          await ctx.resume();
+        }
+
+        const oscillator = ctx.createOscillator();
+        const gain = ctx.createGain();
+        oscillator.type = 'triangle';
+        oscillator.frequency.value = 740;
+        gain.gain.value = 0.02;
+        oscillator.connect(gain);
+        gain.connect(ctx.destination);
+        oscillator.start();
+        oscillator.stop(ctx.currentTime + 0.12);
+      } catch {
+        // best effort only
+      }
+    };
+
     const onMessageNew = (msg: Message & { channelId: string }) => {
       addMessage(msg.channelId, msg);
       // Increment unread if not active channel
@@ -80,6 +109,17 @@ export function ChatLayout({ channelId: initialChannelId }: ChatLayoutProps) {
         fetchApi<{ success: boolean; data: Channel[] }>('/api/chat/channels')
           .then(res => { if (res.success && res.data) setChannels(res.data); })
           .catch(() => {});
+      }
+
+      if (msg.channelId !== activeChannelId && typeof window !== 'undefined' && 'Notification' in window) {
+        void playMessageTone();
+        if (Notification.permission === 'default') {
+          Notification.requestPermission().catch(() => {});
+        } else if (Notification.permission === 'granted') {
+          const sender = msg.sender?.name || 'A teammate';
+          const body = msg.content || 'Sent you a new message';
+          new Notification(sender, { body });
+        }
       }
     };
 
@@ -115,12 +155,17 @@ export function ChatLayout({ channelId: initialChannelId }: ChatLayoutProps) {
       });
     };
 
+    const onNotificationNew = () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] }).catch(() => {});
+    };
+
     socket.on('message:new', onMessageNew);
     socket.on('message:updated', onMessageUpdated);
     socket.on('message:deleted', onMessageDeleted);
     socket.on('message:reaction', onMessageReaction);
     socket.on('typing:user', onTypingUser);
     socket.on('presence:update', onPresenceUpdate);
+    socket.on('notification:new', onNotificationNew);
 
     return () => {
       socket.off('message:new', onMessageNew);
@@ -129,8 +174,11 @@ export function ChatLayout({ channelId: initialChannelId }: ChatLayoutProps) {
       socket.off('message:reaction', onMessageReaction);
       socket.off('typing:user', onTypingUser);
       socket.off('presence:update', onPresenceUpdate);
+      socket.off('notification:new', onNotificationNew);
+      messageAudioContextRef.current?.close().catch(() => {});
+      messageAudioContextRef.current = null;
     };
-  }, [socket, addMessage, updateMessage, deleteMessage, setTypingUser, updatePresence, activeChannelId, updateMessageReactions, setUnreadCount, unreadCounts]);
+  }, [socket, addMessage, updateMessage, deleteMessage, setTypingUser, updatePresence, activeChannelId, updateMessageReactions, setUnreadCount, unreadCounts, queryClient, setChannels]);
 
   return (
     <div className="flex h-full bg-background overflow-hidden">
@@ -139,23 +187,48 @@ export function ChatLayout({ channelId: initialChannelId }: ChatLayoutProps) {
 
       {/* Main content */}
       <div className="flex flex-1 min-w-0">
-        {activeChannelId ? (
+        {openChannelIds.length > 0 ? (
           <>
-            <MessagePane channelId={activeChannelId} />
+            <div className="conversation-surface grid flex-1 min-w-0 gap-3 rounded-[24px] p-3" style={{ gridTemplateColumns: `repeat(${Math.min(openChannelIds.length, 3)}, minmax(0, 1fr))` }}>
+              {openChannelIds.map((channelId) => (
+                <MessagePane
+                  key={channelId}
+                  channelId={channelId}
+                  isFocused={channelId === activeChannelId}
+                  onFocus={() => setActiveChannel(channelId)}
+                  onClose={() => closeChannel(channelId)}
+                />
+              ))}
+            </div>
             {activeThreadMessageId && (
               <ThreadPanel parentMessageId={activeThreadMessageId} channelId={activeChannelId} />
             )}
           </>
         ) : (
           <div className="flex-1 flex items-center justify-center">
-            <div className="text-center max-w-sm">
-              <div className="w-20 h-20 rounded-3xl bg-primary/10 flex items-center justify-center mx-auto mb-5">
-                <span className="text-4xl">💬</span>
+            <div className="max-w-2xl px-8">
+              <div className="mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-[32px] bg-[radial-gradient(circle_at_top,_rgba(34,211,238,0.3),_transparent_55%),linear-gradient(135deg,rgba(8,145,178,0.18),rgba(15,118,110,0.08))]">
+                <span className="text-4xl">C</span>
               </div>
-              <h3 className="text-xl font-bold mb-2">Welcome to CLIQ</h3>
-              <p className="text-muted-foreground text-sm">
-                Select a channel from the sidebar to start chatting with your team.
+              <h3 className="mb-3 text-center text-3xl font-bold">Workspace Command Center</h3>
+              <p className="mx-auto max-w-xl text-center text-sm text-muted-foreground">
+                Channels, direct messages, files, and meetings are wired together in one multi-tenant workspace shell.
+                Pick a team space from the left rail to start collaborating.
               </p>
+              <div className="mt-8 grid gap-4 md:grid-cols-3">
+                <div className="rounded-3xl border border-border bg-card/70 p-5 text-left shadow-sm">
+                  <p className="text-xs uppercase tracking-[0.3em] text-primary">Messaging</p>
+                  <p className="mt-2 text-sm text-muted-foreground">Threads, reactions, and channel-first collaboration flow.</p>
+                </div>
+                <div className="rounded-3xl border border-border bg-card/70 p-5 text-left shadow-sm">
+                  <p className="text-xs uppercase tracking-[0.3em] text-primary">Calling</p>
+                  <p className="mt-2 text-sm text-muted-foreground">Native WebRTC meetings with screen share and live controls.</p>
+                </div>
+                <div className="rounded-3xl border border-border bg-card/70 p-5 text-left shadow-sm">
+                  <p className="text-xs uppercase tracking-[0.3em] text-primary">SaaS Core</p>
+                  <p className="mt-2 text-sm text-muted-foreground">Tenant-aware auth, roles, and plan-ready workspace architecture.</p>
+                </div>
+              </div>
             </div>
           </div>
         )}

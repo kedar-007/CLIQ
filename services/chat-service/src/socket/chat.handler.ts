@@ -5,7 +5,7 @@ import { createLogger } from '@comms/logger';
 import { containsCreditCardPattern, containsSSNPattern } from '@comms/utils';
 import { Queue } from 'bullmq';
 import jwt from 'jsonwebtoken';
-import type { JWTPayload } from '@comms/types';
+import type { Notification, JWTPayload } from '@comms/types';
 
 const logger = createLogger('chat-service:chat');
 
@@ -14,6 +14,33 @@ interface AuthSocket extends Socket {
 }
 
 let notificationQueue: Queue;
+
+async function createInAppNotification(params: {
+  io: Server;
+  userId: string;
+  tenantId: string;
+  type: Notification['type'];
+  title: string;
+  body: string;
+  data?: Record<string, unknown>;
+  channelId?: string;
+  messageId?: string;
+}): Promise<void> {
+  const notification = await prisma.notification.create({
+    data: {
+      userId: params.userId,
+      tenantId: params.tenantId,
+      type: params.type,
+      title: params.title,
+      body: params.body,
+      data: params.data || {},
+      channelId: params.channelId,
+      messageId: params.messageId,
+    },
+  });
+
+  io.to(`user:${params.userId}`).emit('notification:new', notification as Notification);
+}
 
 export function registerChatHandlers(io: Server, redis: Redis): void {
   notificationQueue = new Queue('notifications', { connection: redis });
@@ -95,26 +122,91 @@ export function registerChatHandlers(io: Server, redis: Redis): void {
           });
         }
 
-        // Broadcast to channel room
+        // Broadcast to channel room first.
         io.to(`channel:${channelId}`).emit('message:new', message);
 
-        // Parse mentions and send notifications
-        const mentions = parseMentions(content || '');
-        for (const mention of mentions) {
-          const mentionedUser = await prisma.user.findFirst({
-            where: { name: { contains: mention, mode: 'insensitive' }, tenantId: socket.user?.tenantId },
-          });
-          if (mentionedUser) {
-            await notificationQueue.add('mention', {
-              userId: mentionedUser.id,
-              tenantId: socket.user?.tenantId,
-              type: 'MESSAGE_MENTION',
-              title: `${message.sender?.name} mentioned you`,
-              body: content?.slice(0, 100),
-              data: { channelId, messageId: message.id },
-              channels: ['in-app', 'push'],
+        try {
+          if (channel?.type === 'DM' || channel?.type === 'GROUP_DM') {
+            const recipients = await prisma.channelMember.findMany({
+              where: {
+                channelId,
+                userId: { not: userId },
+              },
+              include: {
+                user: { select: { id: true, name: true } },
+              },
             });
+
+            for (const recipient of recipients) {
+              await createInAppNotification({
+                io,
+                userId: recipient.userId,
+                tenantId: socket.user?.tenantId || '',
+                type: 'MESSAGE_REPLY',
+                title: `New message from ${message.sender?.name || 'A teammate'}`,
+                body: content?.slice(0, 160) || 'You have a new direct message.',
+                data: { channelId, messageId: message.id },
+                channelId,
+                messageId: message.id,
+              });
+            }
           }
+
+          if (parentId) {
+            const parent = await prisma.message.findUnique({
+              where: { id: parentId },
+              include: {
+                sender: { select: { id: true, name: true } },
+              },
+            });
+
+            if (parent?.senderId && parent.senderId !== userId) {
+              await createInAppNotification({
+                io,
+                userId: parent.senderId,
+                tenantId: socket.user?.tenantId || '',
+                type: 'MESSAGE_REPLY',
+                title: `${message.sender?.name || 'A teammate'} replied in a thread`,
+                body: content?.slice(0, 160) || 'You have a new thread reply.',
+                data: { channelId, messageId: message.id, parentId },
+                channelId,
+                messageId: message.id,
+              });
+            }
+          }
+
+          // Parse mentions and send notifications
+          const mentions = parseMentions(content || '');
+          for (const mention of mentions) {
+            const mentionedUser = await prisma.user.findFirst({
+              where: { name: { contains: mention, mode: 'insensitive' }, tenantId: socket.user?.tenantId },
+            });
+            if (mentionedUser) {
+              await createInAppNotification({
+                io,
+                userId: mentionedUser.id,
+                tenantId: socket.user?.tenantId || '',
+                type: 'MESSAGE_MENTION',
+                title: `${message.sender?.name} mentioned you`,
+                body: content?.slice(0, 100) || '',
+                data: { channelId, messageId: message.id },
+                channelId,
+                messageId: message.id,
+              });
+
+              await notificationQueue.add('mention', {
+                userId: mentionedUser.id,
+                tenantId: socket.user?.tenantId,
+                type: 'MESSAGE_MENTION',
+                title: `${message.sender?.name} mentioned you`,
+                body: content?.slice(0, 100),
+                data: { channelId, messageId: message.id },
+                channels: ['push', 'email'],
+              });
+            }
+          }
+        } catch (sideEffectError) {
+          logger.warn('message:send side effects failed', { err: sideEffectError, messageId: message.id, userId });
         }
 
       } catch (err) {

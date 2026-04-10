@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '@comms/db';
 import jwt from 'jsonwebtoken';
-import { generateSlug } from '@comms/utils';
 import type { JWTPayload } from '@comms/types';
 
 export const dmRouter = Router();
@@ -53,7 +52,13 @@ dmRouter.post('/', async (req: any, res: Response) => {
       });
     }
 
-    res.json({ success: true, data: channel });
+    res.json({
+      success: true,
+      data: {
+        ...channel,
+        participantProfiles: channel.members.map((member) => member.user).filter(Boolean),
+      },
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Failed to create DM' });
   }
@@ -88,7 +93,13 @@ dmRouter.post('/group', async (req: any, res: Response) => {
       },
     });
 
-    res.status(201).json({ success: true, data: channel });
+    res.status(201).json({
+      success: true,
+      data: {
+        ...channel,
+        participantProfiles: channel.members.map((member) => member.user).filter(Boolean),
+      },
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Failed to create group DM' });
   }

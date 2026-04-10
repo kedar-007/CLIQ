@@ -29,7 +29,7 @@ cp .env.example .env
 
 ### 4. Start infrastructure (Docker)
 ```bash
-docker compose up -d
+docker compose up -d postgres redis kafka kafka-ui minio minio-setup mailhog clamav redis-commander elasticsearch
 ```
 
 Wait ~60 seconds for Elasticsearch to start. Check status:
@@ -37,10 +37,10 @@ Wait ~60 seconds for Elasticsearch to start. Check status:
 docker compose ps
 ```
 
-### 5. Generate Prisma client + run migrations
+### 5. Generate Prisma client + apply schema
 ```bash
 pnpm db:generate
-cd packages/db && pnpm db:migrate
+cd packages/db && pnpm db:push
 ```
 
 ### 6. Start all services in development mode
@@ -79,7 +79,6 @@ pnpm dev
 | Elasticsearch | 9200 | http://localhost:9200 |
 | Kibana | 5601 | http://localhost:5601 |
 | MinIO | 9000/9001 | http://localhost:9001 |
-| LiveKit | 7880 | ws://localhost:7880 |
 | MailHog | 1025/8025 | http://localhost:8025 |
 | Redis Commander | 8081 | http://localhost:8081 |
 | ClamAV | 3310 | - |
@@ -94,7 +93,7 @@ This platform uses a microservices architecture with:
 - **Kafka** for event streaming between services
 - **Elasticsearch** for full-text search
 - **MinIO** (S3-compatible) for file storage
-- **LiveKit** for WebRTC calls
+- **WebRTC + Socket.IO signaling** for calls
 - **Socket.io** for real-time messaging
 
 ## Development

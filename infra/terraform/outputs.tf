@@ -47,6 +47,7 @@ output "s3_bucket_arn" {
 output "ecr_repository_urls" {
   description = "Map of service name to ECR repository URL"
   value = {
+    web                 = aws_ecr_repository.services["web"].repository_url
     auth-service        = aws_ecr_repository.services["auth-service"].repository_url
     chat-service        = aws_ecr_repository.services["chat-service"].repository_url
     call-service        = aws_ecr_repository.services["call-service"].repository_url

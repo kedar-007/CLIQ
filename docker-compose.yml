@@ -123,8 +123,7 @@ services:
     ports:
       - "5601:5601"
     depends_on:
-      elasticsearch:
-        condition: service_healthy
+      - elasticsearch
     networks:
       - comms-net
 
@@ -209,5 +208,23 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    networks:
+      - comms-net
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: comms_caddy
+    restart: unless-stopped
+    environment:
+      LOCAL_DEV_DOMAIN: ${LOCAL_DEV_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./.local/caddy/data:/data
+      - ./.local/caddy/config:/config
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - comms-net

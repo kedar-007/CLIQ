@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import {
   Hash, Lock, Plus, ChevronDown, ChevronRight,
-  Circle, Video, MessageSquarePlus, Search, Bell, AtSign, UserPlus
+  Circle, Video, MessageSquarePlus, Search, Bell, AtSign, UserPlus, Pin
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/store/chat.store';
@@ -21,7 +21,16 @@ interface CreateChannelForm {
 }
 
 export function Sidebar() {
-  const { channels, activeChannelId, setActiveChannel, unreadCounts, setChannels } = useChatStore();
+  const {
+    channels,
+    activeChannelId,
+    setActiveChannel,
+    unreadCounts,
+    setChannels,
+    pinnedChannelIds,
+    togglePinnedChannel,
+    openChannelIds,
+  } = useChatStore();
   const { user } = useAuthStore();
   const { getStatus } = usePresenceStore();
   const { members } = useWorkspaceStore();
@@ -37,12 +46,23 @@ export function Sidebar() {
   const publicChannels = channels.filter(c => ['PUBLIC', 'ANNOUNCEMENT'].includes(c.type));
   const privateChannels = channels.filter(c => c.type === 'PRIVATE');
   const dmChannels = channels.filter(c => ['DM', 'GROUP_DM'].includes(c.type));
+  const pinnedChannels = channels.filter((channel) => pinnedChannelIds.includes(channel.id));
 
   const statusColors: Record<string, string> = {
     ONLINE: 'bg-emerald-400',
     AWAY: 'bg-amber-400',
     DND: 'bg-red-400',
     OFFLINE: 'bg-slate-500',
+  };
+
+  const resolveDmParticipant = (channel: Channel) => {
+    const participantProfiles = channel.participantProfiles || [];
+    const otherParticipant = participantProfiles.find((participant) => participant.id !== user?.id);
+    if (otherParticipant) return otherParticipant;
+
+    const otherParts = channel.name?.split('-') || [];
+    const otherId = otherParts.find((part) => part !== 'dm' && part !== user?.id);
+    return otherId ? members.find((member) => member.id === otherId) || null : null;
   };
 
   const handleCreateChannel = async () => {
@@ -103,7 +123,7 @@ export function Sidebar() {
         style={{ borderBottom: '1px solid hsl(var(--sidebar-border))' }}
       >
         <div className="flex items-center gap-2 min-w-0">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+          <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-xl bg-[linear-gradient(135deg,#06b6d4,#0f766e)] text-xs font-bold text-white">
             {user?.tenant?.name?.charAt(0)?.toUpperCase() || 'W'}
           </div>
           <div className="min-w-0">
@@ -130,6 +150,30 @@ export function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-2 sidebar-scroll">
+        {pinnedChannels.length > 0 && (
+          <div className="mb-1">
+            <div
+              className="flex items-center gap-1 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider"
+              style={{ color: 'hsl(var(--sidebar-foreground) / 0.5)' }}
+            >
+              <Pin size={11} className="flex-shrink-0" />
+              <span className="flex-1 text-left">Pinned</span>
+            </div>
+            {pinnedChannels.map((channel) => (
+              <ChannelItem
+                key={channel.id}
+                channel={channel}
+                isActive={activeChannelId === channel.id}
+                unread={unreadCounts[channel.id] || 0}
+                onClick={() => setActiveChannel(channel.id)}
+                isPinned
+                isOpen={openChannelIds.includes(channel.id)}
+                onTogglePin={() => togglePinnedChannel(channel.id)}
+              />
+            ))}
+          </div>
+        )}
+
         {/* Channels section */}
         <div className="mb-1">
           <button
@@ -160,6 +204,9 @@ export function Sidebar() {
                   isActive={activeChannelId === ch.id}
                   unread={unreadCounts[ch.id] || 0}
                   onClick={() => setActiveChannel(ch.id)}
+                  isPinned={pinnedChannelIds.includes(ch.id)}
+                  isOpen={openChannelIds.includes(ch.id)}
+                  onTogglePin={() => togglePinnedChannel(ch.id)}
                 />
               ))}
               <button
@@ -194,21 +241,20 @@ export function Sidebar() {
           {dmOpen && (
             <>
               {dmChannels.map(ch => {
-                // Resolve the other person's name from workspace members
-                const otherParts = ch.name?.split('-') || [];
-                const otherId = otherParts.find(p => p !== 'dm' && p !== user?.id);
-                const otherMember = otherId ? members.find(m => m.id === otherId) : null;
-                const displayName = otherMember?.name || ch.name;
+                const otherMember = resolveDmParticipant(ch);
+                const displayName = otherMember?.name?.trim() || otherMember?.email?.split('@')[0] || ch.name;
                 const status = otherMember ? (getStatus(otherMember.id) || otherMember.status) : 'OFFLINE';
                 const statusDot = status === 'ONLINE' ? 'bg-emerald-400' : status === 'AWAY' ? 'bg-amber-400' : 'bg-slate-500';
                 const initials = displayName?.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2) || '?';
                 const isActive = activeChannelId === ch.id;
                 const unread = unreadCounts[ch.id] || 0;
+                const isPinned = pinnedChannelIds.includes(ch.id);
+                const isOpen = openChannelIds.includes(ch.id);
                 return (
                   <button
                     key={ch.id}
                     onClick={() => setActiveChannel(ch.id)}
-                    className="sidebar-channel-item w-full flex items-center gap-2 px-3 py-[5px] text-sm rounded-lg relative"
+                    className="sidebar-channel-item group w-full flex items-center gap-2 px-3 py-[5px] text-sm rounded-lg relative"
                     style={{
                       margin: '0 4px',
                       width: 'calc(100% - 8px)',
@@ -219,12 +265,36 @@ export function Sidebar() {
                   >
                     {isActive && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-r-full" style={{ background: 'hsl(var(--sidebar-primary))' }} />}
                     <div className="relative flex-shrink-0">
-                      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white text-[10px] font-semibold">
+                      <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[linear-gradient(135deg,#06b6d4,#0f766e)] text-[10px] font-semibold text-white">
                         {initials}
                       </div>
                       <span className={cn('absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full ring-1 ring-[hsl(var(--sidebar-background))]', statusDot)} />
                     </div>
                     <span className="truncate flex-1 text-left text-xs">{displayName}</span>
+                    {isOpen && (
+                      <span className="h-1.5 w-1.5 rounded-full bg-cyan-400/90" title="Open in workspace" />
+                    )}
+                    <span
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        togglePinnedChannel(ch.id);
+                      }}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          togglePinnedChannel(ch.id);
+                        }
+                      }}
+                      className={cn(
+                        'rounded-md p-1 transition-opacity',
+                        isPinned ? 'opacity-100 text-amber-400' : 'opacity-0 text-muted-foreground group-hover:opacity-100'
+                      )}
+                      title={isPinned ? 'Unpin conversation' : 'Pin conversation'}
+                    >
+                      <Pin size={12} />
+                    </span>
                     {unread > 0 && !isActive && (
                       <span className="flex-shrink-0 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold flex items-center justify-center"
                         style={{ background: 'hsl(var(--sidebar-primary))', color: 'hsl(var(--sidebar-primary-foreground))' }}>
@@ -286,7 +356,7 @@ export function Sidebar() {
                       {member.avatarUrl
                         ? <img src={member.avatarUrl} alt={member.name} className="w-6 h-6 rounded-full object-cover" />
                         : (
-                          <div className="w-6 h-6 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white text-[10px] font-semibold">
+                          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[linear-gradient(135deg,#06b6d4,#0f766e)] text-[10px] font-semibold text-white">
                             {initials}
                           </div>
                         )
@@ -324,7 +394,7 @@ export function Sidebar() {
             {user?.avatarUrl
               ? <img src={user.avatarUrl} alt={user.name} className="w-8 h-8 rounded-full object-cover" />
               : (
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white text-xs font-semibold">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[linear-gradient(135deg,#06b6d4,#0f766e)] text-xs font-semibold text-white">
                   {initials}
                 </div>
               )
@@ -433,13 +503,16 @@ export function Sidebar() {
 }
 
 function ChannelItem({
-  channel, isActive, unread, onClick, isDm = false
+  channel, isActive, unread, onClick, isDm = false, isPinned = false, isOpen = false, onTogglePin
 }: {
   channel: Channel;
   isActive: boolean;
   unread: number;
   onClick: () => void;
   isDm?: boolean;
+  isPinned?: boolean;
+  isOpen?: boolean;
+  onTogglePin?: () => void;
 }) {
   const isPrivate = channel.type === 'PRIVATE';
   const isAnnouncement = channel.type === 'ANNOUNCEMENT';
@@ -449,7 +522,7 @@ function ChannelItem({
   return (
     <button
       onClick={onClick}
-      className="sidebar-channel-item w-full flex items-center gap-2 px-3 py-[5px] text-sm rounded-lg relative"
+      className="sidebar-channel-item group w-full flex items-center gap-2 px-3 py-[5px] text-sm rounded-lg relative"
       style={{
         margin: '0 4px',
         width: 'calc(100% - 8px)',
@@ -472,6 +545,32 @@ function ChannelItem({
         strokeWidth={isDm ? 0 : isActive ? 2.2 : 1.8}
       />
       <span className="truncate flex-1 text-left">{channel.name}</span>
+      {isOpen && (
+        <span className="h-1.5 w-1.5 rounded-full bg-cyan-400/90" title="Open in workspace" />
+      )}
+      {onTogglePin && (
+        <span
+          onClick={(event) => {
+            event.stopPropagation();
+            onTogglePin();
+          }}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              onTogglePin();
+            }
+          }}
+          className={cn(
+            'rounded-md p-1 transition-opacity',
+            isPinned ? 'opacity-100 text-amber-400' : 'opacity-0 text-muted-foreground group-hover:opacity-100'
+          )}
+          title={isPinned ? 'Unpin conversation' : 'Pin conversation'}
+        >
+          <Pin size={12} />
+        </span>
+      )}
       {unread > 0 && !isActive && (
         <span
           className="flex-shrink-0 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center"

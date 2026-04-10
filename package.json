@@ -4,6 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "turbo run dev --concurrency=25 --filter=!@comms/desktop",
+    "dev:lan": "bash ./scripts/dev-lan.sh",
+    "dev:https": "bash ./scripts/dev-https.sh",
+    "stop:dev": "bash ./scripts/stop-dev.sh",
     "dev:services": "turbo run dev --concurrency=20 --filter=!@comms/web --filter=!@comms/admin --filter=!@comms/desktop",
     "dev:web": "turbo run dev --filter=@comms/web",
     "dev:admin": "turbo run dev --filter=@comms/admin",
@@ -14,6 +17,7 @@
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
     "db:generate": "turbo run db:generate",
     "db:migrate": "turbo run db:migrate",
+    "db:push": "turbo run db:push",
     "db:studio": "cd packages/db && prisma studio",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",

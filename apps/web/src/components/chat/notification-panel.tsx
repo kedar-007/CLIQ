@@ -122,7 +122,7 @@ export function NotificationPanel({ open, onClose }: NotificationPanelProps) {
     fetchNextPage,
     markAsRead,
     markAllAsRead,
-  } = useNotifications(activeFilter);
+  } = useNotifications(activeFilter, open);
 
   // Infinite scroll
   const handleScroll = useCallback(() => {

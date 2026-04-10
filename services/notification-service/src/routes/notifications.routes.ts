@@ -18,11 +18,14 @@ notificationsRouter.use(auth);
 // GET /notifications
 notificationsRouter.get('/', async (req: any, res: Response) => {
   try {
-    const { isRead, cursor, limit = 30 } = req.query;
+    const { isRead, cursor, limit = 30, type } = req.query;
     const take = Math.min(parseInt(limit), 100);
     const where: any = { userId: req.user.sub };
     if (isRead !== undefined) where.isRead = isRead === 'true';
     if (cursor) where.createdAt = { lt: new Date(cursor as string) };
+    if (type) {
+      where.type = Array.isArray(type) ? { in: type } : type;
+    }
 
     const [notifications, unreadCount] = await Promise.all([
       prisma.notification.findMany({

@@ -20,6 +20,7 @@ export interface User {
   email: string;
   name: string;
   avatarUrl?: string;
+  mustChangePassword?: boolean;
   role: UserRole;
   status: UserStatus;
   customStatusEmoji?: string;
@@ -78,6 +79,7 @@ export interface Channel {
   retentionDays?: number;
   isReadOnly: boolean;
   memberCount?: number;
+  participantProfiles?: Pick<User, 'id' | 'name' | 'email' | 'avatarUrl' | 'status'>[];
   createdAt: Date;
 }
 
@@ -169,6 +171,7 @@ export interface CallSession {
   id: string;
   tenantId: string;
   channelId?: string;
+  roomId?: string;
   liveKitRoomId?: string;
   type: CallType;
   startedBy: string;
@@ -191,6 +194,22 @@ export interface CallParticipant {
   videoEnabled: boolean;
   screenSharing: boolean;
   user?: User;
+}
+
+export interface IceServerConfig {
+  urls: string | string[];
+  username?: string;
+  credential?: string;
+}
+
+export interface CallJoinConfig {
+  callSessionId: string;
+  roomId: string;
+  title?: string;
+  callType: 'AUDIO' | 'VIDEO';
+  signalingUrl: string;
+  iceServers: IceServerConfig[];
+  participant: Pick<User, 'id' | 'name' | 'avatarUrl'>;
 }
 
 // ─── Notification ─────────────────────────────────────────────────────────────
@@ -392,6 +411,73 @@ export type ServerToClientEvents = {
   'member:left': (data: { channelId: string; userId: string }) => void;
   'poll:updated': (data: { pollId: string; votes: Record<string, number> }) => void;
 };
+
+export interface WebRTCMediaState {
+  audioEnabled: boolean;
+  videoEnabled: boolean;
+  screenSharing: boolean;
+}
+
+export interface CallRoomParticipant {
+  userId: string;
+  socketId: string;
+  name: string;
+  avatarUrl?: string;
+  joinedAt: string;
+  media: WebRTCMediaState;
+}
+
+export interface WebRTCSessionDescription {
+  type: 'offer' | 'answer' | 'pranswer' | 'rollback';
+  sdp?: string;
+}
+
+export interface WebRTCIceCandidate {
+  candidate?: string;
+  sdpMid?: string | null;
+  sdpMLineIndex?: number | null;
+  usernameFragment?: string | null;
+}
+
+export interface SignalPayload {
+  type: 'offer' | 'answer' | 'ice-candidate';
+  sdp?: WebRTCSessionDescription;
+  candidate?: WebRTCIceCandidate;
+}
+
+export interface CallClientToServerEvents {
+  'call:join-room': (data: { callSessionId: string }) => void;
+  'call:leave-room': (data: { callSessionId: string }) => void;
+  'call:signal': (data: { callSessionId: string; toUserId: string; payload: SignalPayload }) => void;
+  'call:media-state': (data: { callSessionId: string; media: WebRTCMediaState }) => void;
+}
+
+export interface CallServerToClientEvents {
+  'call:room-state': (data: {
+    callSessionId: string;
+    roomId: string;
+    participants: CallRoomParticipant[];
+  }) => void;
+  'call:user-joined': (data: {
+    callSessionId: string;
+    participant: CallRoomParticipant;
+  }) => void;
+  'call:user-left': (data: {
+    callSessionId: string;
+    userId: string;
+  }) => void;
+  'call:signal': (data: {
+    callSessionId: string;
+    fromUserId: string;
+    payload: SignalPayload;
+  }) => void;
+  'call:media-state': (data: {
+    callSessionId: string;
+    userId: string;
+    media: WebRTCMediaState;
+  }) => void;
+  'call:error': (data: { message: string }) => void;
+}
 
 // ─── Plan feature flags ───────────────────────────────────────────────────────
 

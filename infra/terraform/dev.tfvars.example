@@ -1,0 +1,27 @@
+aws_region                 = "us-east-1"
+environment                = "dev"
+cluster_name               = "comms-dev"
+domain_name                = "dev.example.com"
+db_name                    = "comms_dev"
+db_username                = "comms_admin"
+
+availability_zone_count    = 2
+single_nat_gateway         = true
+
+eks_node_instance_type     = "t3.medium"
+eks_node_min_size          = 2
+eks_node_max_size          = 3
+eks_node_desired_size      = 2
+
+rds_instance_class         = "db.t3.medium"
+rds_allocated_storage      = 50
+rds_multi_az               = false
+rds_deletion_protection    = false
+rds_skip_final_snapshot    = true
+rds_backup_retention_period = 1
+enable_rds_performance_insights = false
+
+redis_node_type                = "cache.t3.micro"
+redis_num_cache_clusters       = 1
+redis_multi_az_enabled         = false
+redis_automatic_failover_enabled = false

@@ -15,11 +15,12 @@ import { useWorkspaceStore } from '@/store/workspace.store';
 interface MessageComposerProps {
   channelId: string;
   channelName?: string;
+  isDirectMessage?: boolean;
   parentId?: string;
   onSent?: () => void;
 }
 
-export function MessageComposer({ channelId, channelName, parentId, onSent }: MessageComposerProps) {
+export function MessageComposer({ channelId, channelName, isDirectMessage, parentId, onSent }: MessageComposerProps) {
   const { emit } = useSocketStore();
   const { members } = useWorkspaceStore();
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
@@ -35,7 +36,9 @@ export function MessageComposer({ channelId, channelName, parentId, onSent }: Me
     extensions: [
       StarterKit.configure({ heading: false, horizontalRule: false }),
       Placeholder.configure({
-        placeholder: `Message ${channelName ? `#${channelName}` : '…'}`,
+        placeholder: isDirectMessage
+          ? `Message ${channelName || 'teammate'}`
+          : `Message ${channelName ? `#${channelName}` : '…'}`,
       }),
     ],
     editorProps: {

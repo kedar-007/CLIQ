@@ -33,7 +33,7 @@ function filterTypesByTab(filter: NotificationFilter): NotificationType[] | unde
   }
 }
 
-export function useNotifications(filter: NotificationFilter = 'all') {
+export function useNotifications(filter: NotificationFilter = 'all', enabled = true) {
   const queryClient = useQueryClient();
   const types = filterTypesByTab(filter);
 
@@ -56,6 +56,7 @@ export function useNotifications(filter: NotificationFilter = 'all') {
     },
     initialPageParam: undefined,
     staleTime: 30_000,
+    enabled,
   });
 
   const notifications = query.data?.pages.flatMap((p) => p.data) ?? [];

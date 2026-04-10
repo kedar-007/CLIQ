@@ -208,6 +208,7 @@ model User {
   tenantId                String
   email                   String
   passwordHash            String?
+  mustChangePassword      Boolean    @default(false)
   name                    String
   avatarUrl               String?
   role                    UserRole   @default(MEMBER)

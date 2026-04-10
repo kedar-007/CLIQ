@@ -1,15 +1,26 @@
 'use client';
 
-import { useState } from 'react';
-import { X, UserPlus, Mail, User, Check, Copy, AlertCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { X, UserPlus, Mail, User, Check, Copy, AlertCircle, Trash2, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { fetchApi } from '@/lib/utils';
+import { useAuthStore } from '@/store/auth.store';
 
 interface InviteModalProps {
   onClose: () => void;
 }
 
+interface WorkspaceMember {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  avatarUrl?: string;
+  status: string;
+}
+
 export function InviteModal({ onClose }: InviteModalProps) {
+  const currentUser = useAuthStore((state) => state.user);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<'MEMBER' | 'ADMIN'>('MEMBER');
@@ -17,6 +28,37 @@ export function InviteModal({ onClose }: InviteModalProps) {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState<{ tempPassword: string; name: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [members, setMembers] = useState<WorkspaceMember[]>([]);
+  const [membersLoading, setMembersLoading] = useState(true);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadMembers = async () => {
+      setMembersLoading(true);
+      try {
+        const res = await fetchApi<{ success: boolean; data: WorkspaceMember[] }>('/api/auth/workspace/members');
+        if (isMounted) {
+          setMembers(res.data || []);
+        }
+      } catch {
+        if (isMounted) {
+          setMembers([]);
+        }
+      } finally {
+        if (isMounted) {
+          setMembersLoading(false);
+        }
+      }
+    };
+
+    void loadMembers();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handleInvite = async () => {
     if (!name.trim() || !email.trim()) return;
@@ -35,10 +77,47 @@ export function InviteModal({ onClose }: InviteModalProps) {
         return;
       }
       setSuccess({ tempPassword: res.data.tempPassword, name: res.data.name });
+      setMembers((current) => [
+        ...current,
+        {
+          id: res.data.id,
+          email: res.data.email,
+          name: res.data.name,
+          role: res.data.role,
+          status: 'OFFLINE',
+        },
+      ]);
     } catch {
       setError('Network error. Please try again.');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleDeleteMember = async (member: WorkspaceMember) => {
+    if (member.id === currentUser?.id) {
+      setError('You cannot delete your own account from here.');
+      return;
+    }
+
+    if (!window.confirm(`Delete "${member.name}" from the workspace? You can invite them again later.`)) {
+      return;
+    }
+
+    setDeletingUserId(member.id);
+    setError('');
+    try {
+      await fetchApi(`/api/auth/workspace/members/${member.id}`, {
+        method: 'DELETE',
+      });
+      setMembers((current) => current.filter((item) => item.id !== member.id));
+      if (email === member.email) {
+        setEmail('');
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Failed to delete member.');
+    } finally {
+      setDeletingUserId(null);
     }
   };
 
@@ -53,7 +132,7 @@ export function InviteModal({ onClose }: InviteModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-[480px] bg-card border border-border rounded-2xl shadow-2xl animate-fadeIn">
+      <div className="w-[560px] max-h-[90vh] overflow-hidden bg-card border border-border rounded-2xl shadow-2xl animate-fadeIn">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-border">
           <div className="flex items-center gap-3">
@@ -73,7 +152,7 @@ export function InviteModal({ onClose }: InviteModalProps) {
           </button>
         </div>
 
-        <div className="p-6">
+        <div className="max-h-[calc(90vh-80px)] overflow-y-auto p-6">
           {success ? (
             /* Success state */
             <div className="text-center">
@@ -116,7 +195,7 @@ export function InviteModal({ onClose }: InviteModalProps) {
             </div>
           ) : (
             /* Form */
-            <div className="space-y-4">
+            <div className="space-y-6">
               {error && (
                 <div className="flex items-center gap-2 px-4 py-3 bg-destructive/10 border border-destructive/20 text-destructive text-sm rounded-xl">
                   <AlertCircle size={14} />
@@ -192,6 +271,68 @@ export function InviteModal({ onClose }: InviteModalProps) {
                 >
                   {isLoading ? 'Adding…' : 'Add to workspace'}
                 </button>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-muted/20 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <div>
+                    <h4 className="text-sm font-semibold">Workspace members</h4>
+                    <p className="text-xs text-muted-foreground">Delete a test user here, then invite them again.</p>
+                  </div>
+                  <span className="rounded-full bg-background px-2 py-1 text-xs text-muted-foreground">
+                    {members.length}
+                  </span>
+                </div>
+
+                {membersLoading ? (
+                  <div className="space-y-2">
+                    {[1, 2, 3].map((item) => (
+                      <div key={item} className="flex items-center justify-between rounded-xl border border-border/60 bg-background/70 px-3 py-2">
+                        <div className="space-y-1">
+                          <div className="h-3 w-24 animate-pulse rounded bg-muted" />
+                          <div className="h-2.5 w-40 animate-pulse rounded bg-muted" />
+                        </div>
+                        <div className="h-8 w-8 animate-pulse rounded-lg bg-muted" />
+                      </div>
+                    ))}
+                  </div>
+                ) : members.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
+                    No members found in this workspace yet.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {members.map((member) => (
+                      <div
+                        key={member.id}
+                        className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-background/70 px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">
+                            {member.name}
+                            {member.id === currentUser?.id ? ' (you)' : ''}
+                          </p>
+                          <p className="truncate text-xs text-muted-foreground">{member.email}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="rounded-full bg-muted px-2 py-1 text-[10px] font-medium text-muted-foreground">
+                            {member.role}
+                          </span>
+                          {member.id !== currentUser?.id && (
+                            <button
+                              onClick={() => handleDeleteMember(member)}
+                              disabled={deletingUserId === member.id}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg border border-destructive/20 text-destructive transition hover:bg-destructive/10 disabled:opacity-50"
+                              title="Delete member"
+                            >
+                              {deletingUserId === member.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
