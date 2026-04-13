@@ -65,6 +65,82 @@ async function resolveCallTitle(channelId: string | null | undefined, currentUse
   return channel.name;
 }
 
+async function resolveChannelForEmailInvite(params: {
+  tenantId: string;
+  callerUserId: string;
+  userEmails: string[];
+}): Promise<string> {
+  const normalizedEmails = [...new Set(params.userEmails.map((email) => email.trim().toLowerCase()).filter(Boolean))];
+  const invitedUsers = await prisma.user.findMany({
+    where: {
+      tenantId: params.tenantId,
+      email: { in: normalizedEmails },
+      isDeactivated: false,
+    },
+    select: { id: true, email: true, name: true },
+  });
+
+  const foundEmails = new Set(invitedUsers.map((user) => user.email.toLowerCase()));
+  const missingEmails = normalizedEmails.filter((email) => !foundEmails.has(email));
+  if (missingEmails.length > 0) {
+    throw new Error(`Could not find active users for: ${missingEmails.join(', ')}`);
+  }
+
+  const memberIds = [...new Set([params.callerUserId, ...invitedUsers.map((user) => user.id)])];
+  if (memberIds.length === 2) {
+    const dmSlug = `dm-${[...memberIds].sort().join('-')}`;
+    let channel = await prisma.channel.findFirst({
+      where: { tenantId: params.tenantId, slug: dmSlug, type: 'DM' },
+      select: { id: true },
+    });
+
+    if (!channel) {
+      channel = await prisma.channel.create({
+        data: {
+          tenantId: params.tenantId,
+          name: dmSlug,
+          slug: dmSlug,
+          type: 'DM',
+          createdBy: params.callerUserId,
+          members: {
+            create: memberIds.map((userId) => ({
+              userId,
+              role: userId === params.callerUserId ? 'OWNER' : 'MEMBER',
+            })),
+          },
+        },
+        select: { id: true },
+      });
+    }
+
+    return channel.id;
+  }
+
+  const groupLabel = invitedUsers
+    .slice(0, 3)
+    .map((user) => user.name?.trim() || user.email.split('@')[0])
+    .join(', ');
+
+  const channel = await prisma.channel.create({
+    data: {
+      tenantId: params.tenantId,
+      name: groupLabel ? `Call: ${groupLabel}` : 'Call group',
+      slug: `call-group-${Date.now()}`,
+      type: 'GROUP_DM',
+      createdBy: params.callerUserId,
+      members: {
+        create: memberIds.map((userId) => ({
+          userId,
+          role: userId === params.callerUserId ? 'OWNER' : 'MEMBER',
+        })),
+      },
+    },
+    select: { id: true },
+  });
+
+  return channel.id;
+}
+
 function auth(req: any, res: Response, next: () => void): void {
   const token = req.headers.authorization?.replace('Bearer ', '');
   if (!token) { res.status(401).json({ success: false, error: 'Unauthorized' }); return; }
@@ -82,6 +158,59 @@ callsRouter.get('/incoming', async (req: any, res: Response) => {
   try {
     const userId = req.user.sub;
     const tenantId = req.user.tenantId;
+
+    const unreadInvite = await prisma.notification.findFirst({
+      where: {
+        userId,
+        tenantId,
+        type: 'CALL_INCOMING',
+        isRead: false,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const invitedCallSessionId =
+      unreadInvite && unreadInvite.data && typeof (unreadInvite.data as Record<string, unknown>).callSessionId === 'string'
+        ? ((unreadInvite.data as Record<string, unknown>).callSessionId as string)
+        : null;
+
+    if (invitedCallSessionId) {
+      const invitedCall = await prisma.callSession.findUnique({
+        where: { id: invitedCallSessionId },
+      });
+
+      if (invitedCall && !invitedCall.endedAt) {
+        const [caller, channel] = await Promise.all([
+          prisma.user.findUnique({
+            where: { id: invitedCall.startedBy },
+            select: { id: true, name: true, avatarUrl: true },
+          }),
+          invitedCall.channelId
+            ? prisma.channel.findUnique({
+                where: { id: invitedCall.channelId },
+                select: { id: true, name: true, type: true },
+              })
+            : Promise.resolve(null),
+        ]);
+
+        res.json({
+          success: true,
+          data: {
+            callSessionId: invitedCall.id,
+            channelId: invitedCall.channelId,
+            channelName: channel?.name,
+            channelType: channel?.type,
+            roomId: invitedCall.liveKitRoomId || invitedCall.id,
+            callType: invitedCall.type,
+            fromUserId: caller?.id || invitedCall.startedBy,
+            fromUserName: caller?.name || 'A teammate',
+            fromUserAvatarUrl: caller?.avatarUrl || null,
+            startedAt: invitedCall.startedAt,
+          },
+        });
+        return;
+      }
+    }
 
     const memberships = await prisma.channelMember.findMany({
       where: { userId },
@@ -146,22 +275,109 @@ callsRouter.get('/incoming', async (req: any, res: Response) => {
   }
 });
 
+callsRouter.post('/:id/invite', async (req: any, res: Response) => {
+  try {
+    const { userIds = [], userEmails = [] } = z.object({
+      userIds: z.array(z.string()).optional(),
+      userEmails: z.array(z.string().email()).optional(),
+    }).parse(req.body);
+
+    const callSession = await prisma.callSession.findUnique({ where: { id: req.params.id } });
+    if (!callSession || callSession.endedAt) {
+      res.status(404).json({ success: false, error: 'Call not found or ended' });
+      return;
+    }
+
+    const requesterId = req.user.sub;
+    const activeParticipant = await prisma.callParticipant.findFirst({
+      where: { callSessionId: callSession.id, userId: requesterId, leftAt: null },
+    });
+
+    if (!activeParticipant && callSession.startedBy !== requesterId) {
+      res.status(403).json({ success: false, error: 'Only active participants can invite others' });
+      return;
+    }
+
+    const emailUsers = userEmails.length
+      ? await prisma.user.findMany({
+          where: {
+            tenantId: req.user.tenantId,
+            email: { in: userEmails.map((email) => email.trim().toLowerCase()) },
+            isDeactivated: false,
+          },
+          select: { id: true },
+        })
+      : [];
+
+    const targetUserIds = [...new Set([...userIds, ...emailUsers.map((user) => user.id)])].filter(
+      (candidateId) => candidateId && candidateId !== requesterId
+    );
+
+    if (targetUserIds.length === 0) {
+      res.status(400).json({ success: false, error: 'Select at least one teammate to invite' });
+      return;
+    }
+
+    const inviter = await prisma.user.findUnique({
+      where: { id: requesterId },
+      select: { name: true, avatarUrl: true },
+    });
+    const title = await resolveCallTitle(callSession.channelId, requesterId);
+
+    await prisma.notification.createMany({
+      data: targetUserIds.map((targetUserId) => ({
+        userId: targetUserId,
+        tenantId: req.user.tenantId,
+        type: 'CALL_INCOMING',
+        title: `${inviter?.name || 'A teammate'} invited you to a call`,
+        body: callSession.type === 'VIDEO' ? 'Join the live video call' : 'Join the live audio call',
+        data: {
+          callSessionId: callSession.id,
+          channelId: callSession.channelId,
+          callType: callSession.type,
+          roomId: callSession.liveKitRoomId || callSession.id,
+          fromUserId: requesterId,
+          fromUserName: inviter?.name || 'A teammate',
+          fromUserAvatarUrl: inviter?.avatarUrl || null,
+          title,
+        },
+        channelId: callSession.channelId || undefined,
+      })),
+    });
+
+    res.json({ success: true, data: { invitedUserIds: targetUserIds } });
+  } catch (err) {
+    logger.error('Invite to call error', { err });
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Failed to invite teammates' });
+  }
+});
+
 // POST /calls/start — initiate a new call session
 callsRouter.post('/start', async (req: any, res: Response) => {
   try {
-    const { channelId, type = 'VIDEO' } = z.object({
+    const { channelId, userEmails = [], type = 'VIDEO' } = z.object({
       channelId: z.string().optional(),
+      userEmails: z.array(z.string().email()).optional(),
       type: z.enum(['AUDIO', 'VIDEO']).default('VIDEO'),
     }).parse(req.body);
 
     const userId = req.user.sub;
     const tenantId = req.user.tenantId;
+    const resolvedChannelId =
+      channelId ||
+      (userEmails.length > 0
+        ? await resolveChannelForEmailInvite({
+            tenantId,
+            callerUserId: userId,
+            userEmails,
+          })
+        : undefined);
     const roomId = `room_${tenantId}_${Date.now()}`;
 
     const callSession = await prisma.callSession.create({
       data: {
         tenantId,
-        channelId,
+        channelId: resolvedChannelId,
         liveKitRoomId: roomId,
         type,
         startedBy: userId,
@@ -176,12 +392,12 @@ callsRouter.post('/start', async (req: any, res: Response) => {
       where: { id: userId },
       select: { id: true, name: true, avatarUrl: true },
     });
-    const title = await resolveCallTitle(channelId, userId);
+    const title = await resolveCallTitle(resolvedChannelId, userId);
 
-    if (channelId) {
+    if (resolvedChannelId) {
       const recipients = await prisma.channelMember.findMany({
         where: {
-          channelId,
+          channelId: resolvedChannelId,
           userId: { not: userId },
         },
         select: { userId: true },
@@ -197,14 +413,14 @@ callsRouter.post('/start', async (req: any, res: Response) => {
             body: type === 'VIDEO' ? 'Incoming video call' : 'Incoming audio call',
             data: {
               callSessionId: callSession.id,
-              channelId,
+              channelId: resolvedChannelId,
               callType: type,
               roomId,
               fromUserId: userId,
               fromUserName: user?.name || 'A teammate',
               fromUserAvatarUrl: user?.avatarUrl || null,
             },
-            channelId,
+            channelId: resolvedChannelId,
           })),
           skipDuplicates: false,
         });
@@ -223,7 +439,7 @@ callsRouter.post('/start', async (req: any, res: Response) => {
     });
   } catch (err) {
     logger.error('Start call error', { err });
-    res.status(500).json({ success: false, error: 'Failed to start call' });
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Failed to start call' });
   }
 });
 
@@ -274,6 +490,19 @@ callsRouter.post('/:id/join', async (req: any, res: Response) => {
       where: { id: callSession.id },
       data: { participantCount: { increment: 1 } },
     });
+
+    await prisma.notification.updateMany({
+      where: {
+        userId,
+        type: 'CALL_INCOMING',
+        isRead: false,
+        data: {
+          path: ['callSessionId'],
+          equals: callSession.id,
+        },
+      },
+      data: { isRead: true, readAt: new Date() },
+    }).catch(() => {});
 
     res.json({
       success: true,

@@ -2,16 +2,17 @@
 
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Sidebar } from './sidebar';
-import { MessagePane } from './message-pane';
-import { ThreadPanel } from './thread-panel';
+import type { Channel, Message } from '@comms/types';
+import { fetchApi } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth.store';
-import { useSocketStore } from '@/store/socket.store';
 import { useChatStore } from '@/store/chat.store';
 import { usePresenceStore } from '@/store/presence.store';
+import { useSocketStore } from '@/store/socket.store';
 import { useWorkspaceStore } from '@/store/workspace.store';
-import { fetchApi } from '@/lib/utils';
-import type { Channel, Message } from '@comms/types';
+import { MessagePane } from './message-pane';
+import { SidebarContent } from './sidebar';
+import { ThreadPanel } from './thread-panel';
+import { EmptyWorkspaceState } from '@/components/workspace/dsv-shell';
 
 interface ChatLayoutProps {
   channelId?: string;
@@ -22,52 +23,54 @@ export function ChatLayout({ channelId: initialChannelId }: ChatLayoutProps) {
   const { accessToken } = useAuthStore();
   const { connect, socket } = useSocketStore();
   const {
-    channels, setChannels, addMessage, updateMessage, deleteMessage,
-    setTypingUser, activeChannelId, setActiveChannel, activeThreadMessageId,
-    updateMessageReactions, unreadCounts, setUnreadCount, openChannelIds, closeChannel,
+    channels,
+    setChannels,
+    addMessage,
+    updateMessage,
+    deleteMessage,
+    updateMessageReactions,
+    setTypingUser,
+    unreadCounts,
+    setUnreadCount,
+    activeChannelId,
+    setActiveChannel,
+    activeThreadMessageId,
+    openChannelIds,
+    closeChannel,
   } = useChatStore();
   const { updatePresence } = usePresenceStore();
   const { setMembers } = useWorkspaceStore();
   const messageAudioContextRef = useRef<AudioContext | null>(null);
 
-  // Set initial channel from URL
   useEffect(() => {
     if (initialChannelId) setActiveChannel(initialChannelId);
   }, [initialChannelId, setActiveChannel]);
 
-  // Connect socket
   useEffect(() => {
     if (accessToken) connect(accessToken);
-    return () => {};
   }, [accessToken, connect]);
 
-  // Load workspace members
   useEffect(() => {
     fetchApi<{ success: boolean; data: any[] }>('/api/auth/workspace/members')
-      .then(res => {
-        if (res.success && res.data) setMembers(res.data);
+      .then((response) => {
+        if (response.success && response.data) setMembers(response.data);
       })
       .catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [setMembers]);
 
-  // Load channels
   useEffect(() => {
     fetchApi<{ success: boolean; data: Channel[] }>('/api/chat/channels')
-      .then(res => {
-        if (res.success && res.data) {
-          setChannels(res.data);
-          // Auto-select first channel if none active
-          if (!activeChannelId && !initialChannelId && res.data.length > 0) {
-            setActiveChannel(res.data[0].id);
+      .then((response) => {
+        if (response.success && response.data) {
+          setChannels(response.data);
+          if (!activeChannelId && !initialChannelId && response.data.length > 0) {
+            setActiveChannel(response.data[0].id);
           }
         }
       })
       .catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeChannelId, initialChannelId, setActiveChannel, setChannels]);
 
-  // Socket event handlers
   useEffect(() => {
     if (!socket) return;
 
@@ -79,52 +82,54 @@ export function ChatLayout({ channelId: initialChannelId }: ChatLayoutProps) {
           messageAudioContextRef.current = new AudioCtx();
         }
         const ctx = messageAudioContextRef.current;
-        if (ctx.state === 'suspended') {
-          await ctx.resume();
-        }
+        if (ctx.state === 'suspended') await ctx.resume();
 
         const oscillator = ctx.createOscillator();
         const gain = ctx.createGain();
         oscillator.type = 'triangle';
-        oscillator.frequency.value = 740;
-        gain.gain.value = 0.02;
+        oscillator.frequency.setValueAtTime(740, ctx.currentTime);
+        oscillator.frequency.linearRampToValueAtTime(620, ctx.currentTime + 0.14);
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.018, ctx.currentTime + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
         oscillator.connect(gain);
         gain.connect(ctx.destination);
         oscillator.start();
-        oscillator.stop(ctx.currentTime + 0.12);
+        oscillator.stop(ctx.currentTime + 0.18);
       } catch {
-        // best effort only
+        // best effort
       }
     };
 
-    const onMessageNew = (msg: Message & { channelId: string }) => {
-      addMessage(msg.channelId, msg);
-      // Increment unread if not active channel
-      if (msg.channelId !== activeChannelId) {
-        setUnreadCount(msg.channelId, (unreadCounts[msg.channelId] || 0) + 1);
+    const onMessageNew = (message: Message & { channelId: string }) => {
+      addMessage(message.channelId, message);
+      if (message.channelId !== activeChannelId) {
+        setUnreadCount(message.channelId, (unreadCounts[message.channelId] || 0) + 1);
       }
-      // If the channel isn't in the list (e.g. new DM from someone), reload channels
-      const exists = useChatStore.getState().channels.some(c => c.id === msg.channelId);
+
+      const exists = useChatStore.getState().channels.some((channel) => channel.id === message.channelId);
       if (!exists) {
         fetchApi<{ success: boolean; data: Channel[] }>('/api/chat/channels')
-          .then(res => { if (res.success && res.data) setChannels(res.data); })
+          .then((response) => {
+            if (response.success && response.data) setChannels(response.data);
+          })
           .catch(() => {});
       }
 
-      if (msg.channelId !== activeChannelId && typeof window !== 'undefined' && 'Notification' in window) {
+      if (message.channelId !== activeChannelId && typeof window !== 'undefined' && 'Notification' in window) {
         void playMessageTone();
         if (Notification.permission === 'default') {
           Notification.requestPermission().catch(() => {});
         } else if (Notification.permission === 'granted') {
-          const sender = msg.sender?.name || 'A teammate';
-          const body = msg.content || 'Sent you a new message';
-          new Notification(sender, { body });
+          new Notification(message.sender?.name || 'DSV Connect', {
+            body: message.content || 'New message received',
+          });
         }
       }
     };
 
-    const onMessageUpdated = (msg: any) => {
-      updateMessage(msg.channelId || activeChannelId || '', msg.id, msg);
+    const onMessageUpdated = (message: any) => {
+      updateMessage(message.channelId || activeChannelId || '', message.id, message);
     };
 
     const onMessageDeleted = ({ messageId, channelId }: { messageId: string; channelId: string }) => {
@@ -132,13 +137,14 @@ export function ChatLayout({ channelId: initialChannelId }: ChatLayoutProps) {
     };
 
     const onMessageReaction = ({ messageId, channelId, reactions }: any) => {
-      // Find which channel this message belongs to
-      const targetChannelId = channelId || (() => {
-        for (const [cid, msgs] of Object.entries(useChatStore.getState().messages)) {
-          if ((msgs as any[]).find((m: any) => m.id === messageId)) return cid;
-        }
-        return activeChannelId || '';
-      })();
+      const targetChannelId =
+        channelId ||
+        (() => {
+          for (const [cid, msgs] of Object.entries(useChatStore.getState().messages)) {
+            if ((msgs as any[]).find((message: any) => message.id === messageId)) return cid;
+          }
+          return activeChannelId || '';
+        })();
       if (targetChannelId) updateMessageReactions(targetChannelId, messageId, reactions);
     };
 
@@ -178,57 +184,62 @@ export function ChatLayout({ channelId: initialChannelId }: ChatLayoutProps) {
       messageAudioContextRef.current?.close().catch(() => {});
       messageAudioContextRef.current = null;
     };
-  }, [socket, addMessage, updateMessage, deleteMessage, setTypingUser, updatePresence, activeChannelId, updateMessageReactions, setUnreadCount, unreadCounts, queryClient, setChannels]);
+  }, [
+    socket,
+    addMessage,
+    activeChannelId,
+    deleteMessage,
+    queryClient,
+    setChannels,
+    setTypingUser,
+    setUnreadCount,
+    unreadCounts,
+    updateMessage,
+    updateMessageReactions,
+    updatePresence,
+  ]);
 
   return (
-    <div className="flex h-full bg-background overflow-hidden">
-      {/* Sidebar */}
-      <Sidebar />
+    <div className="flex h-full min-w-0 overflow-hidden rounded-[32px] border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(248,250,252,0.9))] shadow-[0_24px_70px_rgba(15,23,42,0.08)] dark:bg-[linear-gradient(180deg,rgba(2,6,23,0.84),rgba(15,23,42,0.76))]">
+      <div className="hidden lg:block">
+        <SidebarContent compact={openChannelIds.length > 0} />
+      </div>
 
-      {/* Main content */}
-      <div className="flex flex-1 min-w-0">
+      <div className="flex min-w-0 flex-1 gap-3 overflow-hidden p-2 md:p-3 lg:gap-4 lg:p-4">
         {openChannelIds.length > 0 ? (
           <>
-            <div className="conversation-surface grid flex-1 min-w-0 gap-3 rounded-[24px] p-3" style={{ gridTemplateColumns: `repeat(${Math.min(openChannelIds.length, 3)}, minmax(0, 1fr))` }}>
+            <div
+              className={`
+                grid min-w-0 flex-1 gap-3 lg:gap-4
+                ${openChannelIds.length === 1 ? 'grid-cols-1' : ''}
+                ${openChannelIds.length === 2 ? 'grid-cols-1 xl:grid-cols-2' : ''}
+                ${openChannelIds.length >= 3 ? 'grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3' : ''}
+              `}
+            >
               {openChannelIds.map((channelId) => (
                 <MessagePane
                   key={channelId}
                   channelId={channelId}
                   isFocused={channelId === activeChannelId}
+                  compact={openChannelIds.length > 1}
                   onFocus={() => setActiveChannel(channelId)}
                   onClose={() => closeChannel(channelId)}
                 />
               ))}
             </div>
-            {activeThreadMessageId && (
-              <ThreadPanel parentMessageId={activeThreadMessageId} channelId={activeChannelId} />
-            )}
+            {activeThreadMessageId ? (
+              <div className="hidden w-[360px] shrink-0 xl:block">
+                <ThreadPanel parentMessageId={activeThreadMessageId} channelId={activeChannelId} />
+              </div>
+            ) : null}
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="max-w-2xl px-8">
-              <div className="mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-[32px] bg-[radial-gradient(circle_at_top,_rgba(34,211,238,0.3),_transparent_55%),linear-gradient(135deg,rgba(8,145,178,0.18),rgba(15,118,110,0.08))]">
-                <span className="text-4xl">C</span>
-              </div>
-              <h3 className="mb-3 text-center text-3xl font-bold">Workspace Command Center</h3>
-              <p className="mx-auto max-w-xl text-center text-sm text-muted-foreground">
-                Channels, direct messages, files, and meetings are wired together in one multi-tenant workspace shell.
-                Pick a team space from the left rail to start collaborating.
-              </p>
-              <div className="mt-8 grid gap-4 md:grid-cols-3">
-                <div className="rounded-3xl border border-border bg-card/70 p-5 text-left shadow-sm">
-                  <p className="text-xs uppercase tracking-[0.3em] text-primary">Messaging</p>
-                  <p className="mt-2 text-sm text-muted-foreground">Threads, reactions, and channel-first collaboration flow.</p>
-                </div>
-                <div className="rounded-3xl border border-border bg-card/70 p-5 text-left shadow-sm">
-                  <p className="text-xs uppercase tracking-[0.3em] text-primary">Calling</p>
-                  <p className="mt-2 text-sm text-muted-foreground">Native WebRTC meetings with screen share and live controls.</p>
-                </div>
-                <div className="rounded-3xl border border-border bg-card/70 p-5 text-left shadow-sm">
-                  <p className="text-xs uppercase tracking-[0.3em] text-primary">SaaS Core</p>
-                  <p className="mt-2 text-sm text-muted-foreground">Tenant-aware auth, roles, and plan-ready workspace architecture.</p>
-                </div>
-              </div>
+          <div className="flex min-w-0 flex-1 items-center justify-center">
+            <div className="max-w-3xl">
+              <EmptyWorkspaceState
+                title="Choose a conversation to begin"
+                description="Open a channel, jump into a direct message, or start a fresh collaboration thread from the context panel."
+              />
             </div>
           </div>
         )}

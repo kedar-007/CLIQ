@@ -74,7 +74,7 @@ export default function RegisterPage() {
       const json = await res.json();
       if (!json.success) { setError(json.error || 'Registration failed'); return; }
       login(json.data.user, json.data.accessToken);
-      router.push('/chat');
+      router.push('/home');
     } catch {
       setError('Network error. Please try again.');
     } finally {

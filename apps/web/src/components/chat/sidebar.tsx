@@ -1,89 +1,72 @@
 'use client';
 
-import { useState } from 'react';
-import {
-  Hash, Lock, Plus, ChevronDown, ChevronRight,
-  Circle, Video, MessageSquarePlus, Search, Bell, AtSign, UserPlus, Pin
-} from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { useChatStore } from '@/store/chat.store';
+import { useMemo, useState } from 'react';
+import { Hash, Lock, MessageSquarePlus, Pin, Plus, Sparkles, VolumeX } from 'lucide-react';
+import { fetchApi } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth.store';
+import { useChatStore } from '@/store/chat.store';
 import { usePresenceStore } from '@/store/presence.store';
 import { useWorkspaceStore } from '@/store/workspace.store';
-import { fetchApi } from '@/lib/utils';
-import { InviteModal } from './invite-modal';
 import type { Channel } from '@comms/types';
+import { InviteModal } from './invite-modal';
+import { CreateChannelDialog } from './create-channel-dialog';
+import { ContextSearch, PresenceAvatar } from '@/components/workspace/dsv-shell';
 
-interface CreateChannelForm {
-  name: string;
-  type: 'PUBLIC' | 'PRIVATE';
-  description: string;
+function resolveChannelPreview(channel: Channel) {
+  if (channel.type === 'ANNOUNCEMENT') return 'Read-only space for important company updates';
+  if (channel.type === 'PRIVATE') return 'Private channel · invite-only';
+  if (channel.type === 'GROUP_DM') return 'Group conversation';
+  if (channel.type === 'DM') return 'Direct conversation';
+  return channel.description || channel.topic || 'Team collaboration space';
 }
 
 export function Sidebar() {
+  return <SidebarContent compact={false} />;
+}
+
+export function SidebarContent({ compact = false }: { compact?: boolean }) {
+  const { user } = useAuthStore();
+  const { members } = useWorkspaceStore();
+  const { getStatus } = usePresenceStore();
   const {
     channels,
     activeChannelId,
+    openChannelIds,
     setActiveChannel,
-    unreadCounts,
     setChannels,
+    unreadCounts,
     pinnedChannelIds,
     togglePinnedChannel,
-    openChannelIds,
   } = useChatStore();
-  const { user } = useAuthStore();
-  const { getStatus } = usePresenceStore();
-  const { members } = useWorkspaceStore();
-  const [channelsOpen, setChannelsOpen] = useState(true);
-  const [dmOpen, setDmOpen] = useState(true);
-  const [peopleOpen, setPeopleOpen] = useState(true);
-  const [showCreateChannel, setShowCreateChannel] = useState(false);
+
+  const [search, setSearch] = useState('');
   const [showInvite, setShowInvite] = useState(false);
-  const [createForm, setCreateForm] = useState<CreateChannelForm>({ name: '', type: 'PUBLIC', description: '' });
-  const [creating, setCreating] = useState(false);
+  const [showCreateChannel, setShowCreateChannel] = useState(false);
   const [startingDm, setStartingDm] = useState<string | null>(null);
 
-  const publicChannels = channels.filter(c => ['PUBLIC', 'ANNOUNCEMENT'].includes(c.type));
-  const privateChannels = channels.filter(c => c.type === 'PRIVATE');
-  const dmChannels = channels.filter(c => ['DM', 'GROUP_DM'].includes(c.type));
-  const pinnedChannels = channels.filter((channel) => pinnedChannelIds.includes(channel.id));
+  const filteredChannels = useMemo(() => {
+    const query = search.toLowerCase().trim();
+    if (!query) return channels;
+    return channels.filter((channel) => {
+      const preview = resolveChannelPreview(channel).toLowerCase();
+      return channel.name.toLowerCase().includes(query) || preview.includes(query);
+    });
+  }, [channels, search]);
 
-  const statusColors: Record<string, string> = {
-    ONLINE: 'bg-emerald-400',
-    AWAY: 'bg-amber-400',
-    DND: 'bg-red-400',
-    OFFLINE: 'bg-slate-500',
-  };
+  const starred = filteredChannels.filter((channel) => pinnedChannelIds.includes(channel.id));
+  const general = filteredChannels.filter((channel) => channel.isDefault);
+  const projectChannels = filteredChannels.filter(
+    (channel) => !channel.isDefault && ['PUBLIC', 'PRIVATE', 'ANNOUNCEMENT'].includes(channel.type)
+  );
+  const dmChannels = filteredChannels.filter((channel) => ['DM', 'GROUP_DM'].includes(channel.type));
 
   const resolveDmParticipant = (channel: Channel) => {
     const participantProfiles = channel.participantProfiles || [];
     const otherParticipant = participantProfiles.find((participant) => participant.id !== user?.id);
     if (otherParticipant) return otherParticipant;
-
     const otherParts = channel.name?.split('-') || [];
     const otherId = otherParts.find((part) => part !== 'dm' && part !== user?.id);
     return otherId ? members.find((member) => member.id === otherId) || null : null;
-  };
-
-  const handleCreateChannel = async () => {
-    if (!createForm.name.trim()) return;
-    setCreating(true);
-    try {
-      const res = await fetchApi<{ success: boolean; data: Channel }>('/api/chat/channels', {
-        method: 'POST',
-        body: JSON.stringify({ name: createForm.name.trim(), type: createForm.type, description: createForm.description }),
-      });
-      if (res.success) {
-        setChannels([...channels, res.data]);
-        setActiveChannel(res.data.id);
-        setShowCreateChannel(false);
-        setCreateForm({ name: '', type: 'PUBLIC', description: '' });
-      }
-    } catch {
-      // silent fail
-    } finally {
-      setCreating(false);
-    }
   };
 
   const handleStartDm = async (targetUserId: string) => {
@@ -95,490 +78,235 @@ export function Sidebar() {
         body: JSON.stringify({ targetUserId }),
       });
       if (res.success && res.data) {
-        const dmChannel = res.data;
-        const alreadyExists = channels.some(c => c.id === dmChannel.id);
-        if (!alreadyExists) {
-          setChannels([...channels, dmChannel]);
+        const exists = channels.some((channel) => channel.id === res.data.id);
+        if (!exists) {
+          setChannels([...channels, res.data]);
         }
-        setActiveChannel(dmChannel.id);
+        setActiveChannel(res.data.id);
       }
-    } catch {
-      // silent fail
     } finally {
       setStartingDm(null);
     }
   };
 
-  const totalUnread = Object.values(unreadCounts).reduce((a, b) => a + b, 0);
-  const initials = user?.name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'U';
+  const topMembers = compact ? members.slice(0, 4) : members.slice(0, 6);
 
   return (
-    <div
-      className="w-[240px] flex-shrink-0 flex flex-col h-full overflow-hidden"
-      style={{ background: 'hsl(var(--sidebar-background))' }}
+    <aside
+      className={`flex h-full shrink-0 flex-col border-r border-border/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.82),rgba(248,250,252,0.98))] px-3 py-4 transition-all duration-200 dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.76),rgba(15,23,42,0.92))] ${
+        compact ? 'w-[216px]' : 'w-[252px]'
+      }`}
     >
-      {/* Workspace header */}
-      <div
-        className="px-3.5 py-3 flex items-center justify-between flex-shrink-0 cursor-pointer hover:brightness-110 transition-all"
-        style={{ borderBottom: '1px solid hsl(var(--sidebar-border))' }}
-      >
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-xl bg-[linear-gradient(135deg,#06b6d4,#0f766e)] text-xs font-bold text-white">
-            {user?.tenant?.name?.charAt(0)?.toUpperCase() || 'W'}
-          </div>
-          <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-[hsl(var(--sidebar-foreground))] truncate leading-tight">
-              {user?.tenant?.name || 'Workspace'}
-            </h2>
-            <p className="text-[10px] text-[hsl(var(--sidebar-foreground))/0.5] leading-tight">
-              {user?.tenant?.plan || 'FREE'} plan
-            </p>
-          </div>
-        </div>
-        <ChevronDown size={14} className="text-[hsl(var(--sidebar-foreground))/0.5] flex-shrink-0" />
+      <div className="mb-4">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">Workspace</p>
+        <h2 className={`mt-1 font-semibold text-foreground ${compact ? 'text-lg' : 'text-xl'}`}>
+          {user?.tenant?.name || 'DSV Connect'}
+        </h2>
+        {!compact ? (
+          <p className="mt-1 text-sm text-muted-foreground">
+            Curated spaces, direct conversations, and active workstreams.
+          </p>
+        ) : (
+          <p className="mt-1 text-xs text-muted-foreground">Focused collaboration.</p>
+        )}
       </div>
 
-      {/* Search */}
-      <div className="px-3 py-2" style={{ borderBottom: '1px solid hsl(var(--sidebar-border))' }}>
-        <button className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors"
-          style={{ background: 'hsl(var(--sidebar-accent))', color: 'hsl(var(--sidebar-foreground) / 0.6)' }}>
-          <Search size={12} />
-          <span>Search</span>
-          <kbd className="ml-auto text-[10px] opacity-50 bg-black/20 rounded px-1 py-0.5">⌘K</kbd>
-        </button>
+      <div className="mb-4">
+        <ContextSearch
+          placeholder="Search chats, channels, people"
+          rightLabel="cmd+k"
+          value={search}
+          onChange={setSearch}
+        />
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 overflow-y-auto py-2 sidebar-scroll">
-        {pinnedChannels.length > 0 && (
-          <div className="mb-1">
-            <div
-              className="flex items-center gap-1 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider"
-              style={{ color: 'hsl(var(--sidebar-foreground) / 0.5)' }}
-            >
-              <Pin size={11} className="flex-shrink-0" />
-              <span className="flex-1 text-left">Pinned</span>
+      <div className="dsv-scroll flex-1 space-y-4 overflow-y-auto pr-1">
+        {starred.length > 0 ? (
+          <section>
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Starred</p>
+              <Pin className="h-3.5 w-3.5 text-[#7C3AED]" />
             </div>
-            {pinnedChannels.map((channel) => (
-              <ChannelItem
+            <div className="space-y-2">
+              {starred.map((channel) => (
+                <button
+                  key={channel.id}
+                  onClick={() => setActiveChannel(channel.id)}
+                  className={`flex w-full items-center gap-3 rounded-[20px] border px-3 ${compact ? 'py-2.5' : 'py-3'} text-left transition-all duration-150 ${
+                    activeChannelId === channel.id
+                      ? 'border-primary/20 bg-[linear-gradient(135deg,rgba(26,86,219,0.14),rgba(124,58,237,0.08))] shadow-[0_14px_28px_rgba(26,86,219,0.10)]'
+                      : 'border-border/50 bg-white/75 hover:border-primary/15 hover:bg-white dark:bg-slate-950/45'
+                  }`}
+                >
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#7C3AED]/10 text-[#7C3AED]">
+                    {channel.type === 'PRIVATE' ? <Lock className="h-4 w-4" /> : <Hash className="h-4 w-4" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="truncate text-sm font-semibold">{channel.name}</p>
+                      {openChannelIds.includes(channel.id) ? (
+                        <span className="rounded-full bg-[#1A56DB]/10 px-2 py-0.5 text-[10px] font-semibold text-[#1A56DB]">
+                          Open
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="truncate text-xs text-muted-foreground">{resolveChannelPreview(channel)}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        <section>
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Channels</p>
+            <button
+              onClick={() => setShowCreateChannel(true)}
+              className="flex h-8 w-8 items-center justify-center rounded-xl border border-border bg-white/80 text-muted-foreground transition-colors hover:text-primary dark:bg-slate-950/60"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="space-y-2">
+            {[...general, ...projectChannels].map((channel) => (
+              <button
                 key={channel.id}
-                channel={channel}
-                isActive={activeChannelId === channel.id}
-                unread={unreadCounts[channel.id] || 0}
                 onClick={() => setActiveChannel(channel.id)}
-                isPinned
-                isOpen={openChannelIds.includes(channel.id)}
-                onTogglePin={() => togglePinnedChannel(channel.id)}
-              />
+                className={`group flex w-full items-center gap-3 rounded-[20px] border px-3 ${compact ? 'py-2.5' : 'py-3'} text-left transition-all duration-150 ${
+                  activeChannelId === channel.id
+                    ? 'border-primary/20 bg-[linear-gradient(135deg,rgba(26,86,219,0.14),rgba(124,58,237,0.08))] shadow-[0_14px_28px_rgba(26,86,219,0.10)]'
+                    : 'border-transparent hover:border-border/70 hover:bg-white/80 dark:hover:bg-slate-950/50'
+                }`}
+              >
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-primary shadow-[0_4px_12px_rgba(0,0,0,0.05)] dark:bg-slate-950">
+                  {channel.type === 'PRIVATE' ? <Lock className="h-4 w-4" /> : <Hash className="h-4 w-4" />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="truncate text-sm font-medium">{channel.name}</p>
+                    {channel.isReadOnly ? <VolumeX className="h-3.5 w-3.5 text-muted-foreground" /> : null}
+                    {unreadCounts[channel.id] ? (
+                      <span className="badge-pulse rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-white">
+                        {unreadCounts[channel.id]}
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="truncate text-xs text-muted-foreground">{resolveChannelPreview(channel)}</p>
+                </div>
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    togglePinnedChannel(channel.id);
+                  }}
+                  className={`opacity-0 transition-opacity group-hover:opacity-100 ${
+                    pinnedChannelIds.includes(channel.id) ? 'opacity-100' : ''
+                  }`}
+                >
+                  <Pin className={`h-4 w-4 ${pinnedChannelIds.includes(channel.id) ? 'text-[#7C3AED]' : 'text-muted-foreground'}`} />
+                </button>
+              </button>
             ))}
           </div>
-        )}
+        </section>
 
-        {/* Channels section */}
-        <div className="mb-1">
-          <button
-            onClick={() => setChannelsOpen(v => !v)}
-            className="w-full flex items-center gap-1 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider transition-colors group"
-            style={{ color: 'hsl(var(--sidebar-foreground) / 0.5)' }}
-          >
-            {channelsOpen
-              ? <ChevronDown size={11} className="flex-shrink-0" />
-              : <ChevronRight size={11} className="flex-shrink-0" />
-            }
-            <span className="flex-1 text-left">Channels</span>
+        <section>
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Direct messages</p>
             <button
-              onClick={e => { e.stopPropagation(); setShowCreateChannel(true); }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-white/10 transition-all"
-              title="Create channel"
+              onClick={() => setShowInvite(true)}
+              className="flex items-center gap-1 rounded-xl border border-border bg-white/80 px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:text-primary dark:bg-slate-950/60"
             >
-              <Plus size={13} />
+              <MessageSquarePlus className="h-3.5 w-3.5" />
+              New
             </button>
-          </button>
-
-          {channelsOpen && (
-            <>
-              {[...publicChannels, ...privateChannels].map(ch => (
-                <ChannelItem
-                  key={ch.id}
-                  channel={ch}
-                  isActive={activeChannelId === ch.id}
-                  unread={unreadCounts[ch.id] || 0}
-                  onClick={() => setActiveChannel(ch.id)}
-                  isPinned={pinnedChannelIds.includes(ch.id)}
-                  isOpen={openChannelIds.includes(ch.id)}
-                  onTogglePin={() => togglePinnedChannel(ch.id)}
-                />
-              ))}
-              <button
-                onClick={() => setShowCreateChannel(true)}
-                className="w-full flex items-center gap-2 px-3 py-1 text-xs rounded-lg mx-1 transition-colors"
-                style={{ color: 'hsl(var(--sidebar-foreground) / 0.45)', width: 'calc(100% - 8px)' }}
-              >
-                <Plus size={13} />
-                <span>Add channels</span>
-              </button>
-            </>
-          )}
-        </div>
-
-        {/* DMs section */}
-        <div className="mt-2">
-          <button
-            onClick={() => setDmOpen(v => !v)}
-            className="w-full flex items-center gap-1 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider transition-colors group"
-            style={{ color: 'hsl(var(--sidebar-foreground) / 0.5)' }}
-          >
-            {dmOpen
-              ? <ChevronDown size={11} className="flex-shrink-0" />
-              : <ChevronRight size={11} className="flex-shrink-0" />
-            }
-            <span className="flex-1 text-left">Direct Messages</span>
-            <button className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-white/10 transition-all">
-              <Plus size={13} />
-            </button>
-          </button>
-
-          {dmOpen && (
-            <>
-              {dmChannels.map(ch => {
-                const otherMember = resolveDmParticipant(ch);
-                const displayName = otherMember?.name?.trim() || otherMember?.email?.split('@')[0] || ch.name;
-                const status = otherMember ? (getStatus(otherMember.id) || otherMember.status) : 'OFFLINE';
-                const statusDot = status === 'ONLINE' ? 'bg-emerald-400' : status === 'AWAY' ? 'bg-amber-400' : 'bg-slate-500';
-                const initials = displayName?.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2) || '?';
-                const isActive = activeChannelId === ch.id;
-                const unread = unreadCounts[ch.id] || 0;
-                const isPinned = pinnedChannelIds.includes(ch.id);
-                const isOpen = openChannelIds.includes(ch.id);
-                return (
-                  <button
-                    key={ch.id}
-                    onClick={() => setActiveChannel(ch.id)}
-                    className="sidebar-channel-item group w-full flex items-center gap-2 px-3 py-[5px] text-sm rounded-lg relative"
-                    style={{
-                      margin: '0 4px',
-                      width: 'calc(100% - 8px)',
-                      background: isActive ? 'hsl(var(--sidebar-primary) / 0.2)' : undefined,
-                      color: isActive || unread > 0 ? 'hsl(var(--sidebar-foreground))' : 'hsl(var(--sidebar-foreground) / 0.65)',
-                      fontWeight: unread > 0 ? 600 : undefined,
-                    }}
-                  >
-                    {isActive && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-r-full" style={{ background: 'hsl(var(--sidebar-primary))' }} />}
-                    <div className="relative flex-shrink-0">
-                      <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[linear-gradient(135deg,#06b6d4,#0f766e)] text-[10px] font-semibold text-white">
-                        {initials}
-                      </div>
-                      <span className={cn('absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full ring-1 ring-[hsl(var(--sidebar-background))]', statusDot)} />
-                    </div>
-                    <span className="truncate flex-1 text-left text-xs">{displayName}</span>
-                    {isOpen && (
-                      <span className="h-1.5 w-1.5 rounded-full bg-cyan-400/90" title="Open in workspace" />
-                    )}
-                    <span
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        togglePinnedChannel(ch.id);
-                      }}
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          togglePinnedChannel(ch.id);
-                        }
-                      }}
-                      className={cn(
-                        'rounded-md p-1 transition-opacity',
-                        isPinned ? 'opacity-100 text-amber-400' : 'opacity-0 text-muted-foreground group-hover:opacity-100'
-                      )}
-                      title={isPinned ? 'Unpin conversation' : 'Pin conversation'}
-                    >
-                      <Pin size={12} />
-                    </span>
-                    {unread > 0 && !isActive && (
-                      <span className="flex-shrink-0 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold flex items-center justify-center"
-                        style={{ background: 'hsl(var(--sidebar-primary))', color: 'hsl(var(--sidebar-primary-foreground))' }}>
-                        {unread > 9 ? '9+' : unread}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-              {dmChannels.length === 0 && (
-                <p className="px-4 py-1.5 text-xs" style={{ color: 'hsl(var(--sidebar-foreground) / 0.35)' }}>
-                  Click a person below to start a DM
-                </p>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* People section */}
-        {members.length > 0 && (
-          <div className="mt-2">
-            <button
-              onClick={() => setPeopleOpen(v => !v)}
-              className="w-full flex items-center gap-1 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider transition-colors group"
-              style={{ color: 'hsl(var(--sidebar-foreground) / 0.5)' }}
-            >
-              {peopleOpen
-                ? <ChevronDown size={11} className="flex-shrink-0" />
-                : <ChevronRight size={11} className="flex-shrink-0" />
-              }
-              <span className="flex-1 text-left">People</span>
-            </button>
-
-            {peopleOpen && members
-              .filter(m => m.id !== user?.id)
-              .map(member => {
-                const status = getStatus(member.id) || member.status || 'OFFLINE';
-                const statusColor =
-                  status === 'ONLINE' ? 'bg-emerald-400' :
-                  status === 'AWAY' ? 'bg-amber-400' :
-                  status === 'DND' ? 'bg-red-400' :
-                  'bg-slate-500';
-                const initials = member.name?.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2) || '?';
-                const isLoading = startingDm === member.id;
-
-                return (
-                  <button
-                    key={member.id}
-                    onClick={() => handleStartDm(member.id)}
-                    disabled={isLoading}
-                    className="sidebar-channel-item w-full flex items-center gap-2 px-3 py-[5px] text-sm rounded-lg relative disabled:opacity-60"
-                    style={{
-                      margin: '0 4px',
-                      width: 'calc(100% - 8px)',
-                      color: 'hsl(var(--sidebar-foreground) / 0.65)',
-                    }}
-                  >
-                    <div className="relative flex-shrink-0">
-                      {member.avatarUrl
-                        ? <img src={member.avatarUrl} alt={member.name} className="w-6 h-6 rounded-full object-cover" />
-                        : (
-                          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[linear-gradient(135deg,#06b6d4,#0f766e)] text-[10px] font-semibold text-white">
-                            {initials}
-                          </div>
-                        )
-                      }
-                      <span className={cn(
-                        'absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-[hsl(var(--sidebar-background))]',
-                        statusColor
-                      )} />
-                    </div>
-                    <span className="truncate flex-1 text-left text-xs">{member.name}</span>
-                  </button>
-                );
-              })
-            }
           </div>
-        )}
-      </nav>
+          <div className="space-y-2">
+            {dmChannels.map((channel) => {
+              const participant = resolveDmParticipant(channel);
+              const name = participant?.name?.trim() || participant?.email?.split('@')[0] || channel.name;
+              const status = participant?.id ? (getStatus(participant.id) || participant.status) : 'OFFLINE';
+              return (
+                <button
+                  key={channel.id}
+                  onClick={() => setActiveChannel(channel.id)}
+                  className={`flex w-full items-center gap-3 rounded-[20px] border px-3 ${compact ? 'py-2.5' : 'py-3'} text-left transition-all duration-150 ${
+                    activeChannelId === channel.id
+                      ? 'border-primary/20 bg-[linear-gradient(135deg,rgba(26,86,219,0.14),rgba(124,58,237,0.08))] shadow-[0_14px_28px_rgba(26,86,219,0.10)]'
+                      : 'border-transparent hover:border-border/70 hover:bg-white/80 dark:hover:bg-slate-950/50'
+                  }`}
+                >
+                  <PresenceAvatar name={name} src={participant?.avatarUrl} status={status as any} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="truncate text-sm font-medium">{name}</p>
+                      {unreadCounts[channel.id] ? (
+                        <span className="badge-pulse rounded-full bg-[#7C3AED] px-2 py-0.5 text-[10px] font-semibold text-white">
+                          {unreadCounts[channel.id]}
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="truncate text-xs text-muted-foreground">{resolveChannelPreview(channel)}</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
 
-      {/* Invite people button */}
-      <div className="px-3 py-2" style={{ borderTop: '1px solid hsl(var(--sidebar-border))' }}>
+        <section>
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">People</p>
+            <Sparkles className="h-3.5 w-3.5 text-primary" />
+          </div>
+          <div className="space-y-2">
+            {topMembers.map((member) => (
+              <button
+                key={member.id}
+                onClick={() => handleStartDm(member.id)}
+                className={`flex w-full items-center gap-3 rounded-[20px] border border-transparent px-3 ${compact ? 'py-2.5' : 'py-3'} text-left transition-colors hover:border-border/70 hover:bg-white/80 dark:hover:bg-slate-950/50`}
+                disabled={startingDm === member.id}
+              >
+                <PresenceAvatar name={member.name} src={member.avatarUrl} status={(getStatus(member.id) || member.status) as any} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{member.name}</p>
+                  <p className="truncate text-xs text-muted-foreground">{member.jobTitle || member.email}</p>
+                </div>
+                {startingDm === member.id ? (
+                  <span className="text-[11px] text-primary">Opening…</span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <div className={`mt-4 rounded-[24px] border border-border/70 bg-white/82 ${compact ? 'p-3.5' : 'p-4'} shadow-[0_16px_30px_rgba(15,23,42,0.06)] dark:bg-slate-950/60`}>
+        <div className="flex items-center gap-3">
+          <PresenceAvatar name={user?.name || 'User'} src={user?.avatarUrl} status="ONLINE" />
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold">{user?.name}</p>
+            <p className="truncate text-xs text-muted-foreground">{user?.jobTitle || 'Active in workspace'}</p>
+          </div>
+        </div>
         <button
           onClick={() => setShowInvite(true)}
-          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors"
-          style={{ color: 'hsl(var(--sidebar-foreground) / 0.65)', background: 'hsl(var(--sidebar-accent))' }}
+          className={`mt-4 inline-flex w-full items-center justify-center rounded-2xl bg-primary px-4 ${compact ? 'py-2.5 text-[13px]' : 'py-3 text-sm'} font-medium text-white transition-colors hover:bg-primary/90`}
         >
-          <UserPlus size={12} />
-          <span>Invite people</span>
+          Invite people
         </button>
       </div>
 
-      {/* User profile footer */}
-      <div className="px-2 py-2 flex-shrink-0">
-        <button className="w-full flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:brightness-110 transition-all">
-          <div className="relative flex-shrink-0">
-            {user?.avatarUrl
-              ? <img src={user.avatarUrl} alt={user.name} className="w-8 h-8 rounded-full object-cover" />
-              : (
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[linear-gradient(135deg,#06b6d4,#0f766e)] text-xs font-semibold text-white">
-                  {initials}
-                </div>
-              )
-            }
-            <span className={cn(
-              'absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full ring-2 ring-[hsl(var(--sidebar-background))]',
-              statusColors[getStatus(user?.id || '')] || 'bg-slate-500'
-            )} />
-          </div>
-          <div className="flex-1 min-w-0 text-left">
-            <p className="text-sm font-medium truncate leading-tight" style={{ color: 'hsl(var(--sidebar-foreground))' }}>
-              {user?.name}
-            </p>
-            <p className="text-[11px] truncate leading-tight" style={{ color: 'hsl(var(--sidebar-foreground) / 0.5)' }}>
-              {user?.customStatusText || (getStatus(user?.id || '') === 'ONLINE' ? 'Active' : 'Away')}
-            </p>
-          </div>
-        </button>
-      </div>
-
-      {/* Invite Modal */}
-      {showInvite && <InviteModal onClose={() => setShowInvite(false)} />}
-
-      {/* Create Channel Modal */}
-      {showCreateChannel && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="w-[440px] bg-card border border-border rounded-2xl shadow-2xl p-6 animate-fadeIn">
-            <h3 className="text-lg font-semibold mb-1">Create a channel</h3>
-            <p className="text-sm text-muted-foreground mb-5">Channels are where your team communicates.</p>
-
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium mb-1.5 block">Channel name</label>
-                <div className="flex items-center gap-2 px-3 py-2.5 border border-input rounded-xl bg-background">
-                  <Hash size={15} className="text-muted-foreground flex-shrink-0" />
-                  <input
-                    type="text"
-                    value={createForm.name}
-                    onChange={e => setCreateForm(f => ({ ...f, name: e.target.value.toLowerCase().replace(/\s+/g, '-') }))}
-                    placeholder="e.g. marketing"
-                    className="flex-1 bg-transparent outline-none text-sm"
-                    autoFocus
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium mb-1.5 block">Description (optional)</label>
-                <input
-                  type="text"
-                  value={createForm.description}
-                  onChange={e => setCreateForm(f => ({ ...f, description: e.target.value }))}
-                  placeholder="What's this channel about?"
-                  className="w-full px-3 py-2.5 border border-input rounded-xl bg-background text-sm outline-none focus:ring-2 focus:ring-ring"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-medium mb-1.5 block">Visibility</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { value: 'PUBLIC' as const, label: 'Public', desc: 'Anyone in workspace', icon: Hash },
-                    { value: 'PRIVATE' as const, label: 'Private', desc: 'Only invited members', icon: Lock },
-                  ].map(({ value, label, desc, icon: Icon }) => (
-                    <button
-                      key={value}
-                      onClick={() => setCreateForm(f => ({ ...f, type: value }))}
-                      className={cn(
-                        'flex items-start gap-2.5 p-3 rounded-xl border-2 text-left transition-colors',
-                        createForm.type === value
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border hover:border-border/80 hover:bg-accent'
-                      )}
-                    >
-                      <Icon size={16} className={createForm.type === value ? 'text-primary mt-0.5' : 'text-muted-foreground mt-0.5'} />
-                      <div>
-                        <p className="text-sm font-medium">{label}</p>
-                        <p className="text-xs text-muted-foreground">{desc}</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2.5 mt-6">
-              <button
-                onClick={() => setShowCreateChannel(false)}
-                className="px-4 py-2 text-sm rounded-xl border border-border hover:bg-accent transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateChannel}
-                disabled={!createForm.name.trim() || creating}
-                className="px-4 py-2 text-sm rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors font-medium"
-              >
-                {creating ? 'Creating…' : 'Create channel'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ChannelItem({
-  channel, isActive, unread, onClick, isDm = false, isPinned = false, isOpen = false, onTogglePin
-}: {
-  channel: Channel;
-  isActive: boolean;
-  unread: number;
-  onClick: () => void;
-  isDm?: boolean;
-  isPinned?: boolean;
-  isOpen?: boolean;
-  onTogglePin?: () => void;
-}) {
-  const isPrivate = channel.type === 'PRIVATE';
-  const isAnnouncement = channel.type === 'ANNOUNCEMENT';
-
-  const Icon = isDm ? Circle : isPrivate ? Lock : isAnnouncement ? AtSign : Hash;
-
-  return (
-    <button
-      onClick={onClick}
-      className="sidebar-channel-item group w-full flex items-center gap-2 px-3 py-[5px] text-sm rounded-lg relative"
-      style={{
-        margin: '0 4px',
-        width: 'calc(100% - 8px)',
-        background: isActive ? 'hsl(var(--sidebar-primary) / 0.2)' : undefined,
-        color: isActive || unread > 0
-          ? 'hsl(var(--sidebar-foreground))'
-          : 'hsl(var(--sidebar-foreground) / 0.65)',
-        fontWeight: unread > 0 ? 600 : undefined,
-      }}
-    >
-      {isActive && (
-        <span
-          className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-r-full"
-          style={{ background: 'hsl(var(--sidebar-primary))' }}
-        />
-      )}
-      <Icon
-        size={isDm ? 6 : 14}
-        className={cn('flex-shrink-0', isDm && 'fill-current')}
-        strokeWidth={isDm ? 0 : isActive ? 2.2 : 1.8}
+      {showInvite ? <InviteModal onClose={() => setShowInvite(false)} /> : null}
+      <CreateChannelDialog
+        open={showCreateChannel}
+        onClose={() => setShowCreateChannel(false)}
+        onCreated={(channel) => {
+          setChannels([...channels, channel]);
+          setActiveChannel(channel.id);
+          setShowCreateChannel(false);
+        }}
       />
-      <span className="truncate flex-1 text-left">{channel.name}</span>
-      {isOpen && (
-        <span className="h-1.5 w-1.5 rounded-full bg-cyan-400/90" title="Open in workspace" />
-      )}
-      {onTogglePin && (
-        <span
-          onClick={(event) => {
-            event.stopPropagation();
-            onTogglePin();
-          }}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              onTogglePin();
-            }
-          }}
-          className={cn(
-            'rounded-md p-1 transition-opacity',
-            isPinned ? 'opacity-100 text-amber-400' : 'opacity-0 text-muted-foreground group-hover:opacity-100'
-          )}
-          title={isPinned ? 'Unpin conversation' : 'Pin conversation'}
-        >
-          <Pin size={12} />
-        </span>
-      )}
-      {unread > 0 && !isActive && (
-        <span
-          className="flex-shrink-0 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center"
-          style={{ background: 'hsl(var(--sidebar-primary))', color: 'hsl(var(--sidebar-primary-foreground))' }}
-        >
-          {unread > 99 ? '99+' : unread}
-        </span>
-      )}
-    </button>
+    </aside>
   );
 }

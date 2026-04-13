@@ -33,7 +33,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (hasHydrated && isAuthenticated) {
-      router.replace(user?.mustChangePassword ? '/settings?force=password-reset' : '/chat');
+      router.replace(user?.mustChangePassword ? '/settings?force=password-reset' : '/home');
     }
   }, [hasHydrated, isAuthenticated, router, user?.mustChangePassword]);
 
@@ -53,7 +53,7 @@ export default function LoginPage() {
       if (!json.success) { setError(json.error || 'Login failed'); return; }
 
       login(json.data.user, json.data.accessToken);
-      router.push(json.data.user?.mustChangePassword ? '/settings?force=password-reset' : '/chat');
+      router.push(json.data.user?.mustChangePassword ? '/settings?force=password-reset' : '/home');
     } catch {
       setError('Network error. Please try again.');
     } finally {

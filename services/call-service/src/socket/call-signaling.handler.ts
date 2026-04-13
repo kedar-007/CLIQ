@@ -243,6 +243,15 @@ export function registerCallSignaling(io: Server): void {
       });
     });
 
+    socket.on('call:reaction', ({ callSessionId, reaction, raisedHand }) => {
+      io.to(getRoomKey(callSessionId)).emit('call:reaction', {
+        callSessionId,
+        userId: user.sub,
+        reaction,
+        raisedHand,
+      });
+    });
+
     socket.on('call:leave-room', async ({ callSessionId }) => {
       await leaveRoom(io, socket, callSessionId);
     });

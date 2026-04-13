@@ -427,6 +427,8 @@ export interface CallRoomParticipant {
   media: WebRTCMediaState;
 }
 
+export type CallReactionType = '👍' | '👏' | '🎉' | '❤️' | '✋';
+
 export interface WebRTCSessionDescription {
   type: 'offer' | 'answer' | 'pranswer' | 'rollback';
   sdp?: string;
@@ -450,6 +452,7 @@ export interface CallClientToServerEvents {
   'call:leave-room': (data: { callSessionId: string }) => void;
   'call:signal': (data: { callSessionId: string; toUserId: string; payload: SignalPayload }) => void;
   'call:media-state': (data: { callSessionId: string; media: WebRTCMediaState }) => void;
+  'call:reaction': (data: { callSessionId: string; reaction: CallReactionType; raisedHand?: boolean }) => void;
 }
 
 export interface CallServerToClientEvents {
@@ -475,6 +478,12 @@ export interface CallServerToClientEvents {
     callSessionId: string;
     userId: string;
     media: WebRTCMediaState;
+  }) => void;
+  'call:reaction': (data: {
+    callSessionId: string;
+    userId: string;
+    reaction: CallReactionType;
+    raisedHand?: boolean;
   }) => void;
   'call:error': (data: { message: string }) => void;
 }

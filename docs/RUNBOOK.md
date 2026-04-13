@@ -1,11 +1,14 @@
 # DSV-CLIQ Runbook
+Start command - cd /Users/kedar/Documents/DSV-CLIQ && docker compose up -d postgres redis minio minio-setup mailhog clamav redis-commander caddy && cd packages/db && pnpm dotenv -e ../../.env prisma db push --accept-data-loss && pnpm dotenv -e ../../.env prisma generate && cd ../.. && pnpm dev:https
+
+Stop Command - cd /Users/kedar/Documents/DSV-CLIQ && pnpm stop:dev
 
 ## Local prerequisites
 
 - Node.js 20+
 - `pnpm` 8+
 - Docker Desktop running
-
+000
 ## First-time local setup
 
 From the repo root:

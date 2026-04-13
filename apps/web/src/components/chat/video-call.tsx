@@ -3,11 +3,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import {
+  Check,
+  Hand,
+  Heart,
   Mic,
   MicOff,
   Monitor,
   MonitorOff,
   PhoneOff,
+  Plus,
+  PartyPopper,
+  ThumbsUp,
   Video,
   VideoOff,
   Users,
@@ -16,6 +22,7 @@ import {
 import type {
   CallClientToServerEvents,
   CallJoinConfig,
+  CallReactionType,
   CallRoomParticipant,
   CallServerToClientEvents,
   IceServerConfig,
@@ -23,6 +30,7 @@ import type {
 } from '@comms/types';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth.store';
+import { useWorkspaceStore } from '@/store/workspace.store';
 
 type CallSocket = Socket<CallServerToClientEvents, CallClientToServerEvents>;
 
@@ -40,6 +48,8 @@ interface ParticipantTile {
   media: WebRTCMediaState;
   joinedAt: string;
   connectionState?: RTCPeerConnectionState;
+  handRaised?: boolean;
+  activeReaction?: string | null;
 }
 
 function formatDeviceAccessError(cause: unknown, context: 'media' | 'screen-share'): string {
@@ -74,7 +84,15 @@ function formatDeviceAccessError(cause: unknown, context: 'media' | 'screen-shar
     : 'Unable to access microphone or camera.';
 }
 
-function ParticipantCard({ participant, isAudioCall }: { participant: ParticipantTile; isAudioCall: boolean }) {
+function ParticipantCard({
+  participant,
+  isAudioCall,
+  featured = false,
+}: {
+  participant: ParticipantTile;
+  isAudioCall: boolean;
+  featured?: boolean;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -147,12 +165,13 @@ function ParticipantCard({ participant, isAudioCall }: { participant: Participan
   return (
     <div
       className={cn(
-        'relative overflow-hidden rounded-[28px] border border-white/10 bg-slate-950/80 shadow-[0_24px_80px_rgba(15,23,42,0.45)]',
+        'relative overflow-hidden rounded-[30px] border border-white/50 bg-[linear-gradient(180deg,rgba(255,255,255,0.82),rgba(255,255,255,0.72))] shadow-[0_24px_60px_rgba(15,23,42,0.10)] backdrop-blur-xl',
+        featured ? 'min-h-[420px]' : 'min-h-[188px]',
         participant.media.screenSharing && 'ring-2 ring-cyan-400/80',
         isSpeaking && 'ring-2 ring-emerald-400/90 shadow-[0_0_0_1px_rgba(74,222,128,0.35),0_24px_80px_rgba(34,197,94,0.18)]'
       )}
     >
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(34,211,238,0.16),_transparent_52%),linear-gradient(180deg,rgba(15,23,42,0.05),rgba(15,23,42,0.75))]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(124,58,237,0.12),_transparent_40%),linear-gradient(180deg,rgba(255,255,255,0.1),rgba(226,232,240,0.5))]" />
 
       {showVideo ? (
         <video
@@ -163,15 +182,15 @@ function ParticipantCard({ participant, isAudioCall }: { participant: Participan
           muted={participant.isLocal}
         />
       ) : (
-        <div className="relative flex h-full min-h-[240px] items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(34,211,238,0.22),_transparent_45%),linear-gradient(160deg,rgba(15,23,42,0.98),rgba(30,41,59,0.82))]">
+        <div className="relative flex h-full items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(124,58,237,0.18),_transparent_35%),linear-gradient(160deg,rgba(248,250,252,0.96),rgba(226,232,240,0.84))] dark:bg-[radial-gradient(circle_at_top,_rgba(124,58,237,0.18),_transparent_35%),linear-gradient(160deg,rgba(15,23,42,0.98),rgba(30,41,59,0.82))]">
           {participant.avatarUrl ? (
             <img
               src={participant.avatarUrl}
               alt={participant.name}
-              className="h-24 w-24 rounded-3xl object-cover shadow-2xl"
+              className={cn('rounded-[28px] object-cover shadow-2xl', featured ? 'h-28 w-28' : 'h-20 w-20')}
             />
           ) : (
-            <div className="flex h-24 w-24 items-center justify-center rounded-3xl bg-white/10 text-3xl font-semibold text-white shadow-2xl">
+            <div className={cn('flex items-center justify-center rounded-[28px] bg-[linear-gradient(135deg,#1A56DB,#7C3AED)] font-semibold text-white shadow-2xl', featured ? 'h-28 w-28 text-4xl' : 'h-20 w-20 text-2xl')}>
               {initials}
             </div>
           )}
@@ -180,7 +199,13 @@ function ParticipantCard({ participant, isAudioCall }: { participant: Participan
 
       {!participant.isLocal && <audio ref={audioRef} autoPlay playsInline />}
 
-      <div className="absolute inset-x-0 bottom-0 flex items-end justify-between bg-gradient-to-t from-slate-950 via-slate-950/70 to-transparent px-4 py-4">
+      {participant.activeReaction ? (
+        <div className="absolute left-1/2 top-5 z-10 -translate-x-1/2 rounded-full bg-slate-950/70 px-4 py-2 text-3xl shadow-[0_18px_40px_rgba(15,23,42,0.35)] backdrop-blur">
+          {participant.activeReaction}
+        </div>
+      ) : null}
+
+      <div className="absolute inset-x-0 bottom-0 flex items-end justify-between bg-gradient-to-t from-slate-950/80 via-slate-950/45 to-transparent px-4 py-4">
         <div>
           <p className="text-sm font-semibold text-white">
             {participant.name}
@@ -197,6 +222,11 @@ function ParticipantCard({ participant, isAudioCall }: { participant: Participan
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {participant.handRaised && (
+            <span className="rounded-full bg-amber-500/90 px-2.5 py-1 text-[11px] font-medium text-white">
+              Hand raised
+            </span>
+          )}
           {participant.media.audioEnabled && isSpeaking && (
             <span className="rounded-full bg-emerald-500/90 px-2.5 py-1 text-[11px] font-medium text-white">
               Speaking
@@ -252,6 +282,7 @@ function resolveCallSignalingPath(): string {
 
 export function VideoCall({ config, onLeave }: VideoCallProps) {
   const { accessToken } = useAuthStore();
+  const { members } = useWorkspaceStore();
   const socketRef = useRef<CallSocket | null>(null);
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const remoteStreamsRef = useRef<Map<string, MediaStream>>(new Map());
@@ -261,6 +292,7 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const screenAudioTrackRef = useRef<MediaStreamTrack | null>(null);
   const disconnectTimeoutsRef = useRef<Map<string, number>>(new Map());
+  const negotiationRetryTimeoutsRef = useRef<Map<string, number>>(new Map());
   const negotiatingPeersRef = useRef<Set<string>>(new Set());
   const ringbackContextRef = useRef<AudioContext | null>(null);
   const ringbackIntervalRef = useRef<number | null>(null);
@@ -273,6 +305,10 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [joinRetryNonce, setJoinRetryNonce] = useState(0);
+  const [showInvitePanel, setShowInvitePanel] = useState(false);
+  const [inviteQuery, setInviteQuery] = useState('');
+  const [invitingUserIds, setInvitingUserIds] = useState<string[]>([]);
+  const [inviteFeedback, setInviteFeedback] = useState<string | null>(null);
 
   const rtcIceServers = useMemo(() => toRtcIceServers(config.iceServers), [config.iceServers]);
   const isAudioCall = config.callType === 'AUDIO';
@@ -319,9 +355,11 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
       isLocal: true,
       joinedAt: prev?.joinedAt || new Date().toISOString(),
       stream: localStream,
-      media,
-      connectionState: 'connected',
-    }));
+        media,
+        connectionState: 'connected',
+        handRaised: prev?.handRaised || false,
+        activeReaction: prev?.activeReaction || null,
+      }));
   }, [config.participant, localMediaState, updateParticipant]);
 
   const closePeerConnection = useCallback((userId: string) => {
@@ -329,6 +367,11 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
     if (disconnectTimer) {
       window.clearTimeout(disconnectTimer);
       disconnectTimeoutsRef.current.delete(userId);
+    }
+    const negotiationTimer = negotiationRetryTimeoutsRef.current.get(userId);
+    if (negotiationTimer) {
+      window.clearTimeout(negotiationTimer);
+      negotiationRetryTimeoutsRef.current.delete(userId);
     }
     negotiatingPeersRef.current.delete(userId);
 
@@ -397,6 +440,32 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
     }
   }, [config.callSessionId]);
 
+  const requestPeerOffer = useCallback((remoteUserId: string, peer: RTCPeerConnection, retryCount = 0) => {
+    const existingRetry = negotiationRetryTimeoutsRef.current.get(remoteUserId);
+    if (existingRetry) {
+      window.clearTimeout(existingRetry);
+      negotiationRetryTimeoutsRef.current.delete(remoteUserId);
+    }
+
+    if (negotiatingPeersRef.current.has(remoteUserId) || peer.signalingState !== 'stable') {
+      if (retryCount >= 10) return;
+      const timeoutId = window.setTimeout(() => {
+        negotiationRetryTimeoutsRef.current.delete(remoteUserId);
+        requestPeerOffer(remoteUserId, peer, retryCount + 1);
+      }, 250);
+      negotiationRetryTimeoutsRef.current.set(remoteUserId, timeoutId);
+      return;
+    }
+
+    void offerPeer(remoteUserId, peer);
+  }, [offerPeer]);
+
+  const renegotiateAllPeers = useCallback(() => {
+    peerConnectionsRef.current.forEach((peer, userId) => {
+      requestPeerOffer(userId, peer);
+    });
+  }, [requestPeerOffer]);
+
   const addOutgoingScreenAudioTrack = useCallback(async (track: MediaStreamTrack) => {
     const stream = localStreamRef.current;
     if (!stream) return;
@@ -413,7 +482,8 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
         }
       })
     );
-  }, []);
+    renegotiateAllPeers();
+  }, [renegotiateAllPeers]);
 
   const removeOutgoingScreenAudioTrack = useCallback(async () => {
     const track = screenAudioTrackRef.current;
@@ -434,7 +504,8 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
         stream.removeTrack(existingTrack);
       }
     });
-  }, []);
+    renegotiateAllPeers();
+  }, [renegotiateAllPeers]);
 
   const restoreCameraTrack = useCallback(async () => {
     if (!cameraTrackRef.current || cameraTrackRef.current.readyState === 'ended') {
@@ -501,7 +572,7 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
     };
 
     peer.onnegotiationneeded = () => {
-      void offerPeer(remote.userId, peer);
+      requestPeerOffer(remote.userId, peer);
     };
 
     peer.ontrack = (event) => {
@@ -529,6 +600,8 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
           screenSharing: false,
         },
         connectionState: peer.connectionState,
+        handRaised: prev?.handRaised || false,
+        activeReaction: prev?.activeReaction || null,
       }));
     };
 
@@ -546,6 +619,8 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
           screenSharing: false,
         },
         connectionState: peer.connectionState,
+        handRaised: prev?.handRaised || false,
+        activeReaction: prev?.activeReaction || null,
       }));
 
       if (peer.connectionState === 'connected') {
@@ -567,14 +642,14 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
             closePeerConnection(remote.userId);
           }
           disconnectTimeoutsRef.current.delete(remote.userId);
-        }, 7000);
+        }, 15000);
         disconnectTimeoutsRef.current.set(remote.userId, timeoutId);
       }
     };
 
     peerConnectionsRef.current.set(remote.userId, peer);
     return peer;
-  }, [closePeerConnection, config.callSessionId, isAudioCall, rtcIceServers, updateParticipant]);
+  }, [closePeerConnection, config.callSessionId, isAudioCall, requestPeerOffer, rtcIceServers, updateParticipant]);
 
   const createOfferFor = useCallback(async (remote: CallRoomParticipant) => {
     const peer = ensurePeerConnection(remote);
@@ -648,9 +723,11 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
                 stream: prev?.stream || null,
                 isLocal: false,
                 joinedAt: participant.joinedAt,
-                media: participant.media,
-                connectionState: prev?.connectionState || 'new',
-              }));
+            media: participant.media,
+            connectionState: prev?.connectionState || 'new',
+            handRaised: prev?.handRaised || false,
+            activeReaction: prev?.activeReaction || null,
+          }));
               await createOfferFor(participant);
             })
           );
@@ -666,6 +743,8 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
             joinedAt: participant.joinedAt,
             media: participant.media,
             connectionState: prev?.connectionState || 'connecting',
+            handRaised: prev?.handRaised || false,
+            activeReaction: prev?.activeReaction || null,
           }));
         });
 
@@ -688,7 +767,49 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
             joinedAt: prev?.joinedAt || new Date().toISOString(),
             media,
             connectionState: prev?.connectionState,
+            handRaised: prev?.handRaised || false,
+            activeReaction: prev?.activeReaction || null,
           }));
+        });
+
+        socket.on('call:reaction', ({ userId, reaction, raisedHand }) => {
+          updateParticipant(userId, (prev) => ({
+            userId,
+            name: prev?.name || 'Participant',
+            avatarUrl: prev?.avatarUrl,
+            stream: prev?.stream || null,
+            isLocal: userId === config.participant.id,
+            joinedAt: prev?.joinedAt || new Date().toISOString(),
+            media: prev?.media || {
+              audioEnabled: true,
+              videoEnabled: !isAudioCall,
+              screenSharing: false,
+            },
+            connectionState: prev?.connectionState,
+            handRaised: reaction === '✋' ? !!raisedHand : prev?.handRaised || false,
+            activeReaction: reaction === '✋' ? prev?.activeReaction || null : reaction,
+          }));
+
+          if (reaction !== '✋') {
+            window.setTimeout(() => {
+              updateParticipant(userId, (prev) => ({
+                userId,
+                name: prev?.name || 'Participant',
+                avatarUrl: prev?.avatarUrl,
+                stream: prev?.stream || null,
+                isLocal: userId === config.participant.id,
+                joinedAt: prev?.joinedAt || new Date().toISOString(),
+                media: prev?.media || {
+                  audioEnabled: true,
+                  videoEnabled: !isAudioCall,
+                  screenSharing: false,
+                },
+                connectionState: prev?.connectionState,
+                handRaised: prev?.handRaised || false,
+                activeReaction: null,
+              }));
+            }, 2200);
+          }
         });
 
         socket.on('call:signal', async ({ fromUserId, payload }) => {
@@ -741,6 +862,8 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
       peerConnectionsRef.current.clear();
       disconnectTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
       disconnectTimeoutsRef.current.clear();
+      negotiationRetryTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      negotiationRetryTimeoutsRef.current.clear();
       negotiatingPeersRef.current.clear();
       remoteStreamsRef.current.clear();
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -844,7 +967,14 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
       if (audioTrack) {
         screenAudioTrackRef.current = audioTrack;
         audioTrack.onended = () => {
-          void stopScreenShare();
+          const currentTrack = screenAudioTrackRef.current;
+          if (!currentTrack || currentTrack.id !== audioTrack.id) return;
+          void removeOutgoingScreenAudioTrack().finally(() => {
+            if (screenAudioTrackRef.current?.id === audioTrack.id) {
+              screenAudioTrackRef.current = null;
+            }
+            setNotice('Shared audio stopped, but screen sharing is still active. Re-share a Chrome tab with Share tab audio enabled if you want others to hear it again.');
+          });
         };
         await addOutgoingScreenAudioTrack(audioTrack);
       } else if (audioCaptureUnavailable) {
@@ -854,6 +984,7 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
       }
 
       await replaceOutgoingVideoTrack(track);
+      renegotiateAllPeers();
       setIsScreenSharing(true);
       setIsCameraOff(false);
       const media = {
@@ -866,7 +997,7 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
     } catch (cause) {
       setNotice(formatDeviceAccessError(cause, 'screen-share'));
     }
-  }, [addOutgoingScreenAudioTrack, emitMediaState, isMuted, isScreenSharing, replaceOutgoingVideoTrack, stopScreenShare, syncLocalParticipant]);
+  }, [addOutgoingScreenAudioTrack, emitMediaState, isMuted, isScreenSharing, removeOutgoingScreenAudioTrack, renegotiateAllPeers, replaceOutgoingVideoTrack, stopScreenShare, syncLocalParticipant]);
 
   const leaveCall = useCallback(async () => {
     try {
@@ -895,14 +1026,117 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
     return left.joinedAt.localeCompare(right.joinedAt);
   });
 
-  const gridClass =
-    participantTiles.length <= 1
-      ? 'grid-cols-1'
-      : participantTiles.length === 2
-      ? 'grid-cols-2'
-      : participantTiles.length <= 4
-      ? 'grid-cols-2'
-      : 'grid-cols-3';
+  const displayTitle = useMemo(() => {
+    const nonLocal = participantTiles
+      .filter((participant) => !participant.isLocal)
+      .map((participant) => participant.name)
+      .filter(Boolean);
+
+    if (nonLocal.length === 0) {
+      return config.title || 'Workspace call';
+    }
+
+    if (nonLocal.length <= 3) {
+      return nonLocal.join(', ');
+    }
+
+    return `${nonLocal.slice(0, 3).join(', ')} +${nonLocal.length - 3}`;
+  }, [config.title, participantTiles]);
+
+  const participantIds = useMemo(
+    () => new Set(participantTiles.map((participant) => participant.userId)),
+    [participantTiles]
+  );
+
+  const availableInvitees = useMemo(() => {
+    const query = inviteQuery.trim().toLowerCase();
+    return members.filter((member) => {
+      if (participantIds.has(member.id)) return false;
+      const haystack = `${member.name} ${member.email}`.toLowerCase();
+      return query ? haystack.includes(query) : true;
+    });
+  }, [inviteQuery, members, participantIds]);
+
+  const featuredParticipant = useMemo(() => {
+    if (participantTiles.length === 0) return null;
+    const screenSharer = participantTiles.find((participant) => participant.media.screenSharing);
+    if (screenSharer) return screenSharer;
+    const speaker = participantTiles.find(
+      (participant) => participant.media.audioEnabled && participant.connectionState === 'connected'
+    );
+    return speaker || participantTiles.find((participant) => !participant.isLocal) || participantTiles[0];
+  }, [participantTiles]);
+
+  const secondaryParticipants = participantTiles.filter((participant) => participant.userId !== featuredParticipant?.userId);
+
+  const inviteToCall = useCallback(async (userId: string) => {
+    if (invitingUserIds.includes(userId)) return;
+    setInvitingUserIds((current) => [...current, userId]);
+    setInviteFeedback(null);
+
+    try {
+      const response = await fetch(`/api/calls/${config.callSessionId}/invite`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
+        body: JSON.stringify({ userIds: [userId] }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || 'Failed to invite teammate');
+      }
+      setInviteFeedback('Invite sent. They can join from their incoming call alert.');
+    } catch (cause) {
+      setInviteFeedback(cause instanceof Error ? cause.message : 'Failed to invite teammate');
+    } finally {
+      setInvitingUserIds((current) => current.filter((id) => id !== userId));
+    }
+  }, [accessToken, config.callSessionId, invitingUserIds]);
+
+  const sendReaction = useCallback((reaction: CallReactionType) => {
+    const raisedHand = reaction === '✋'
+      ? !participantsRef.current[config.participant.id]?.handRaised
+      : undefined;
+
+    updateParticipant(config.participant.id, (prev) => ({
+      userId: config.participant.id,
+      name: config.participant.name,
+      avatarUrl: config.participant.avatarUrl,
+      stream: prev?.stream || localStreamRef.current,
+      isLocal: true,
+      joinedAt: prev?.joinedAt || new Date().toISOString(),
+      media: prev?.media || localMediaState(),
+      connectionState: prev?.connectionState || 'connected',
+      handRaised: reaction === '✋' ? !!raisedHand : prev?.handRaised || false,
+      activeReaction: reaction === '✋' ? prev?.activeReaction || null : reaction,
+    }));
+
+    socketRef.current?.emit('call:reaction', {
+      callSessionId: config.callSessionId,
+      reaction,
+      raisedHand,
+    });
+
+    if (reaction !== '✋') {
+      window.setTimeout(() => {
+        updateParticipant(config.participant.id, (prev) => ({
+          userId: config.participant.id,
+          name: config.participant.name,
+          avatarUrl: config.participant.avatarUrl,
+          stream: prev?.stream || localStreamRef.current,
+          isLocal: true,
+          joinedAt: prev?.joinedAt || new Date().toISOString(),
+          media: prev?.media || localMediaState(),
+          connectionState: prev?.connectionState || 'connected',
+          handRaised: prev?.handRaised || false,
+          activeReaction: null,
+        }));
+      }, 2200);
+    }
+  }, [config.callSessionId, config.participant, localMediaState, updateParticipant]);
 
   useEffect(() => {
     const shouldRingback = participantTiles.length <= 1 && isReady;
@@ -994,57 +1228,131 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
   }
 
   return (
-    <div className="flex h-full flex-col bg-[radial-gradient(circle_at_top,_rgba(34,211,238,0.16),_transparent_30%),linear-gradient(180deg,#020617_0%,#0f172a_65%,#111827_100%)] text-white">
-      <div className="flex items-center justify-between px-6 py-5">
+    <div className="flex h-full flex-col bg-[radial-gradient(circle_at_top,rgba(124,58,237,0.10),transparent_26%),linear-gradient(180deg,#f8fafc_0%,#eef2ff_48%,#e2e8f0_100%)] text-slate-900 dark:bg-[radial-gradient(circle_at_top,rgba(124,58,237,0.16),transparent_24%),linear-gradient(180deg,#020617_0%,#0f172a_65%,#111827_100%)] dark:text-white">
+      <div className="flex items-center justify-between px-6 pt-5 pb-3">
         <div>
-          <p className="text-xs uppercase tracking-[0.32em] text-cyan-200/80">Live Workspace Call</p>
-          <h2 className="mt-2 text-2xl font-semibold">{config.title || config.roomId}</h2>
-          <p className="mt-1 text-sm text-slate-300">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="h-3 w-3 rounded-full bg-[#FF5F57] shadow-[0_0_0_1px_rgba(0,0,0,0.06)]" />
+            <span className="h-3 w-3 rounded-full bg-[#FEBC2E] shadow-[0_0_0_1px_rgba(0,0,0,0.06)]" />
+            <span className="h-3 w-3 rounded-full bg-[#28C840] shadow-[0_0_0_1px_rgba(0,0,0,0.06)]" />
+          </div>
+          <p className="text-xs uppercase tracking-[0.32em] text-primary/70 dark:text-cyan-200/80">DSV Connect Conference</p>
+          <h2 className="mt-2 text-2xl font-semibold">{displayTitle}</h2>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">
             {participantTiles.length} participant{participantTiles.length === 1 ? '' : 's'} connected
           </p>
         </div>
-        <div className="flex items-center gap-3 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 backdrop-blur">
-          <Wifi className={cn('h-4 w-4', isReady ? 'text-emerald-300' : 'text-amber-300')} />
-          {isReady ? 'Signaling connected' : 'Connecting'}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowInvitePanel((current) => !current)}
+            className={cn(
+              'inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm shadow-sm backdrop-blur transition-colors',
+              showInvitePanel
+                ? 'border-primary/25 bg-primary/10 text-primary'
+                : 'border-white/60 bg-white/80 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10'
+            )}
+          >
+            <Plus className="h-4 w-4" />
+            Add people
+          </button>
+          <div className="flex items-center gap-3 rounded-full border border-white/60 bg-white/80 px-4 py-2 text-sm text-slate-600 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5 dark:text-slate-200">
+            <Wifi className={cn('h-4 w-4', isReady ? 'text-emerald-500 dark:text-emerald-300' : 'text-amber-500 dark:text-amber-300')} />
+            {isReady ? 'Connected' : 'Connecting'}
+          </div>
         </div>
       </div>
 
       {notice && (
-        <div className="mx-6 mb-2 flex items-start justify-between gap-4 rounded-2xl border border-amber-300/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+        <div className="mx-6 mb-2 flex items-start justify-between gap-4 rounded-[24px] border border-amber-300/40 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm dark:border-amber-300/20 dark:bg-amber-400/10 dark:text-amber-100">
           <p>{notice}</p>
           <button
             onClick={() => setNotice(null)}
-            className="shrink-0 rounded-full border border-white/10 px-2 py-1 text-xs text-white/80 transition hover:bg-white/10"
+            className="shrink-0 rounded-full border border-amber-300/40 px-2 py-1 text-xs transition hover:bg-amber-100 dark:border-white/10 dark:hover:bg-white/10"
           >
             Dismiss
           </button>
         </div>
       )}
 
-      <div className="grid flex-1 gap-4 px-6 pb-6" style={{ gridTemplateRows: 'minmax(0, 1fr)' }}>
-        <div className={cn('grid min-h-0 gap-4', gridClass)}>
-          {participantTiles.map((participant) => (
-            <ParticipantCard
-              key={participant.userId}
-              participant={participant}
-              isAudioCall={isAudioCall}
-            />
-          ))}
-        </div>
-      </div>
-
-      <div className="border-t border-white/10 bg-slate-950/75 px-6 py-5 backdrop-blur-xl">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 text-sm text-slate-300">
-            <Users className="h-4 w-4" />
-            Mesh WebRTC
+      <div className="grid flex-1 gap-4 px-6 pb-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
+          <div className="overflow-hidden rounded-[34px] border border-white/60 bg-white/72 p-4 shadow-[0_26px_60px_rgba(15,23,42,0.12)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+            <div className="mb-4 flex items-center justify-between rounded-[22px] border border-border/70 bg-white/70 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">Meeting room</p>
+                <p className="mt-1 text-sm font-medium text-foreground dark:text-white">Design review and live collaboration</p>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="rounded-full bg-primary/10 px-3 py-1.5 text-primary">Recording ready</span>
+                <span className="rounded-full bg-emerald-500/10 px-3 py-1.5 text-emerald-600 dark:text-emerald-300">HD</span>
+              </div>
+            </div>
+            {featuredParticipant ? (
+              <div className="grid h-full min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
+                <ParticipantCard participant={featuredParticipant} isAudioCall={isAudioCall} featured />
+                <div className="dsv-scroll grid min-h-0 gap-3 overflow-y-auto">
+                  {secondaryParticipants.length > 0 ? (
+                    secondaryParticipants.map((participant) => (
+                      <ParticipantCard
+                        key={participant.userId}
+                        participant={participant}
+                        isAudioCall={isAudioCall}
+                      />
+                    ))
+                  ) : (
+                    <div className="flex min-h-[188px] items-center justify-center rounded-[28px] border border-dashed border-border/80 bg-[linear-gradient(135deg,rgba(26,86,219,0.06),rgba(124,58,237,0.04))] text-center text-sm text-muted-foreground dark:border-white/10 dark:bg-white/5">
+                      Waiting for teammates to join this conversation.
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : null}
           </div>
-          <div className="flex items-center gap-3">
+
+          <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-4 rounded-[30px] border border-white/60 bg-white/80 px-5 py-4 shadow-[0_22px_44px_rgba(15,23,42,0.10)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/75">
+            <div className="flex items-center gap-3 text-sm text-slate-500 dark:text-slate-300">
+              <Users className="h-4 w-4" />
+              Team conference
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+            <button
+              onClick={() => sendReaction('✋')}
+              className={cn(
+                'rounded-full border px-3 py-2 text-sm transition',
+                participantTiles.find((participant) => participant.userId === config.participant.id)?.handRaised
+                  ? 'border-amber-400/50 bg-amber-500/20 text-amber-700 dark:text-amber-100'
+                  : 'border-white/60 bg-white text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10'
+              )}
+              title="Raise hand"
+            >
+              <Hand className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => sendReaction('👍')}
+              className="rounded-full border border-white/60 bg-white px-3 py-2 text-slate-700 transition hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+              title="Thumbs up"
+            >
+              <ThumbsUp className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => sendReaction('❤️')}
+              className="rounded-full border border-white/60 bg-white px-3 py-2 text-slate-700 transition hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+              title="Send love"
+            >
+              <Heart className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => sendReaction('🎉')}
+              className="rounded-full border border-white/60 bg-white px-3 py-2 text-slate-700 transition hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+              title="Celebrate"
+            >
+              <PartyPopper className="h-4 w-4" />
+            </button>
             <button
               onClick={toggleMute}
               className={cn(
                 'rounded-full border px-4 py-3 transition',
-                isMuted ? 'border-rose-400/50 bg-rose-500/20 text-rose-100' : 'border-white/10 bg-white/5 text-white hover:bg-white/10'
+                isMuted ? 'border-rose-400/50 bg-rose-500/20 text-rose-700 dark:text-rose-100' : 'border-white/60 bg-white text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10'
               )}
               title={isMuted ? 'Unmute microphone' : 'Mute microphone'}
             >
@@ -1055,7 +1363,7 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
               disabled={isAudioCall}
               className={cn(
                 'rounded-full border px-4 py-3 transition',
-                isCameraOff ? 'border-amber-400/50 bg-amber-500/20 text-amber-100' : 'border-white/10 bg-white/5 text-white hover:bg-white/10',
+                isCameraOff ? 'border-amber-400/50 bg-amber-500/20 text-amber-700 dark:text-amber-100' : 'border-white/60 bg-white text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10',
                 isAudioCall && 'cursor-not-allowed opacity-50'
               )}
               title={isCameraOff ? 'Turn camera on' : 'Turn camera off'}
@@ -1066,7 +1374,7 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
               onClick={toggleScreenShare}
               className={cn(
                 'rounded-full border px-4 py-3 transition',
-                isScreenSharing ? 'border-cyan-400/60 bg-cyan-500/20 text-cyan-100' : 'border-white/10 bg-white/5 text-white hover:bg-white/10'
+                isScreenSharing ? 'border-cyan-400/60 bg-cyan-500/20 text-cyan-700 dark:text-cyan-100' : 'border-white/60 bg-white text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10'
               )}
               title={isScreenSharing ? 'Stop sharing' : 'Share screen'}
             >
@@ -1081,6 +1389,135 @@ export function VideoCall({ config, onLeave }: VideoCallProps) {
             </button>
           </div>
         </div>
+      </div>
+
+        <aside className="dsv-scroll min-h-0 overflow-y-auto rounded-[32px] border border-white/60 bg-white/78 p-4 shadow-[0_24px_50px_rgba(15,23,42,0.10)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.28em] text-primary/70 dark:text-cyan-200/70">Session details</p>
+              <h3 className="mt-2 text-lg font-semibold">Conference room</h3>
+            </div>
+            <button
+              onClick={() => setShowInvitePanel((current) => !current)}
+              className="rounded-full border border-border/70 px-3 py-1.5 text-xs text-muted-foreground transition hover:border-primary/20 hover:text-primary dark:border-white/10 dark:text-slate-200"
+            >
+              {showInvitePanel ? 'People' : 'Invite'}
+            </button>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="rounded-[22px] border border-border/70 bg-white/80 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Live now</p>
+              <p className="mt-2 text-2xl font-semibold">{participantTiles.length}</p>
+            </div>
+            <div className="rounded-[22px] border border-border/70 bg-white/80 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Mode</p>
+              <p className="mt-2 text-2xl font-semibold">{isAudioCall ? 'Audio' : 'Video'}</p>
+            </div>
+          </div>
+
+          {showInvitePanel ? (
+            <>
+              <div className="mt-4 rounded-2xl border border-border/70 bg-white/85 px-3 py-2.5 dark:border-white/10 dark:bg-slate-950/35">
+                <input
+                  value={inviteQuery}
+                  onChange={(event) => setInviteQuery(event.target.value)}
+                  placeholder="Search teammates by name or email"
+                  className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400 dark:text-white"
+                />
+              </div>
+
+              {inviteFeedback ? (
+                <div className="mt-3 rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-700 dark:text-cyan-100">
+                  {inviteFeedback}
+                </div>
+              ) : null}
+
+              <div className="mt-4 space-y-2">
+                {availableInvitees.length > 0 ? (
+                  availableInvitees.map((member) => {
+                    const inviting = invitingUserIds.includes(member.id);
+                    const initials = member.name
+                      .split(' ')
+                      .map((part) => part.charAt(0))
+                      .join('')
+                      .slice(0, 2)
+                      .toUpperCase();
+
+                    return (
+                      <div
+                        key={member.id}
+                        className="flex items-center gap-3 rounded-[22px] border border-border/70 bg-white/80 px-3 py-3 dark:border-white/10 dark:bg-white/5"
+                      >
+                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#1A56DB,#7C3AED)] text-sm font-semibold text-white">
+                          {initials}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">{member.name}</p>
+                          <p className="truncate text-xs text-muted-foreground">{member.email}</p>
+                        </div>
+                        <button
+                          onClick={() => inviteToCall(member.id)}
+                          disabled={inviting}
+                          className={cn(
+                            'inline-flex items-center gap-1 rounded-full px-3 py-2 text-xs font-medium transition-colors',
+                            inviting
+                              ? 'bg-muted text-muted-foreground'
+                              : 'bg-primary/10 text-primary hover:bg-primary/15'
+                          )}
+                        >
+                          {inviting ? <Check className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                          {inviting ? 'Inviting…' : 'Invite'}
+                        </button>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="rounded-[22px] border border-border/70 bg-white/80 px-4 py-6 text-center text-sm text-muted-foreground dark:border-white/10 dark:bg-white/5">
+                    Everyone available is already in this call.
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="mt-4 space-y-3">
+              {participantTiles.map((participant) => (
+                <div
+                  key={participant.userId}
+                  className="flex items-center gap-3 rounded-[22px] border border-border/70 bg-white/80 px-3 py-3 dark:border-white/10 dark:bg-white/5"
+                >
+                  <div className="relative">
+                    {participant.avatarUrl ? (
+                      <img src={participant.avatarUrl} alt={participant.name} className="h-11 w-11 rounded-2xl object-cover" />
+                    ) : (
+                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#1A56DB,#7C3AED)] text-sm font-semibold text-white">
+                        {participant.name
+                          .split(' ')
+                          .map((part) => part[0])
+                          .join('')
+                          .slice(0, 2)
+                          .toUpperCase()}
+                      </div>
+                    )}
+                    <span className={cn('absolute -bottom-1 -right-1 h-3.5 w-3.5 rounded-full border-2 border-white dark:border-slate-950', participant.media.audioEnabled ? 'bg-emerald-500' : 'bg-rose-500')} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">{participant.name}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {participant.media.screenSharing
+                        ? 'Presenting'
+                        : participant.handRaised
+                        ? 'Hand raised'
+                        : participant.media.audioEnabled
+                        ? 'In conversation'
+                        : 'Muted'}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </aside>
       </div>
     </div>
   );

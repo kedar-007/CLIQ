@@ -8,8 +8,8 @@ import './globals.css';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'CommsPlatform — Enterprise Communication',
-  description: 'Real-time team communication, video calls, file sharing, and collaboration.',
+  title: 'DSV Connect',
+  description: 'Connect. Collaborate. Achieve. Enterprise collaboration for modern teams.',
   icons: { icon: '/favicon.ico' },
 };
 

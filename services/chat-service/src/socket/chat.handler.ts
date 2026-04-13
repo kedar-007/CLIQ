@@ -150,6 +150,28 @@ export function registerChatHandlers(io: Server, redis: Redis): void {
                 messageId: message.id,
               });
             }
+          } else if (channel) {
+            const recipients = await prisma.channelMember.findMany({
+              where: {
+                channelId,
+                userId: { not: userId },
+              },
+              select: { userId: true },
+            });
+
+            for (const recipient of recipients) {
+              await createInAppNotification({
+                io,
+                userId: recipient.userId,
+                tenantId: socket.user?.tenantId || '',
+                type: 'MESSAGE_REPLY',
+                title: `${message.sender?.name || 'A teammate'} posted in #${channel.name}`,
+                body: content?.slice(0, 160) || 'You have a new channel message.',
+                data: { channelId, messageId: message.id },
+                channelId,
+                messageId: message.id,
+              });
+            }
           }
 
           if (parentId) {

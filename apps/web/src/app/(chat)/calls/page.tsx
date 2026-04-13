@@ -1,26 +1,28 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useInfiniteQuery, useQuery, useMutation } from '@tanstack/react-query';
-import { format, formatDuration, intervalToDuration, parseISO } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import {
+  ArrowUpRight,
+  PhoneCall,
   Phone,
   Video,
   PhoneMissed,
   PhoneIncoming,
   PhoneOutgoing,
-  Users,
   X,
   Plus,
   Mic,
-  MicOff,
   VideoIcon,
-  VideoOff,
   ExternalLink,
 } from 'lucide-react';
 import { cn, fetchApi } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth.store';
-import type { CallSession, CallType } from '@comms/types';
+import { useWorkspaceStore } from '@/store/workspace.store';
+import type { CallJoinConfig, CallSession, CallType } from '@comms/types';
+import { FloatingHeader, PresenceAvatar, ScreenSection } from '@/components/workspace/dsv-shell';
+import { CallOverlay } from '@/components/chat/call-overlay';
 
 type CallDirection = 'INCOMING' | 'OUTGOING' | 'MISSED';
 
@@ -42,14 +44,16 @@ interface ActiveCall {
 
 function formatCallDuration(seconds: number): string {
   if (!seconds || seconds <= 0) return '—';
-  const duration = intervalToDuration({ start: 0, end: seconds * 1000 });
-  if (duration.hours && duration.hours > 0) {
-    return `${duration.hours}h ${duration.minutes}m`;
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainingSeconds = seconds % 60;
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
   }
-  if (duration.minutes && duration.minutes > 0) {
-    return `${duration.minutes}m ${duration.seconds}s`;
+  if (minutes > 0) {
+    return `${minutes}m ${remainingSeconds}s`;
   }
-  return `${duration.seconds}s`;
+  return `${remainingSeconds}s`;
 }
 
 const DIRECTION_CONFIG: Record<
@@ -73,8 +77,16 @@ const DIRECTION_CONFIG: Record<
   },
 };
 
+function formatFriendlyName(name?: string | null, email?: string | null) {
+  const cleanName = name?.trim();
+  if (cleanName) return cleanName;
+  if (email) return email.split('@')[0];
+  return 'Unknown teammate';
+}
+
 export default function CallsPage() {
   const [showStartCallDialog, setShowStartCallDialog] = useState(false);
+  const [activeCall, setActiveCall] = useState<CallJoinConfig | null>(null);
   const [callForm, setCallForm] = useState({
     channelId: '',
     emails: '',
@@ -82,6 +94,11 @@ export default function CallsPage() {
   });
 
   const user = useAuthStore((s) => s.user);
+  const { members } = useWorkspaceStore();
+  const selectableMembers = useMemo(
+    () => members.filter((member) => member.id !== user?.id && !member.isDeactivated),
+    [members, user?.id]
+  );
 
   const { data: activeCallsData } = useQuery({
     queryKey: ['calls', 'active'],
@@ -125,7 +142,7 @@ export default function CallsPage() {
           .map((e) => e.trim())
           .filter(Boolean);
       }
-      const res = await fetchApi<{ success: boolean; data: { roomId: string; token: string } }>(
+      const res = await fetchApi<{ success: boolean; data: CallJoinConfig }>(
         '/api/calls/start',
         {
           method: 'POST',
@@ -136,12 +153,25 @@ export default function CallsPage() {
     },
     onSuccess: (data) => {
       setShowStartCallDialog(false);
-      window.open(`/call/${data.roomId}?token=${data.token}`, '_blank');
+      setActiveCall(data);
     },
   });
 
   const activeCalls = activeCallsData ?? [];
   const historyItems = historyData?.pages.flatMap((p) => p.calls) ?? [];
+
+  const getCallDisplayName = (call: CallHistoryItem) => {
+    if (call.channelName?.trim()) return call.channelName;
+
+    const others =
+      call.participants
+        ?.filter((participant) => participant.id !== user?.id)
+        .map((participant) => formatFriendlyName(participant.name))
+        .filter(Boolean) ?? [];
+
+    if (others.length > 0) return others.slice(0, 3).join(', ');
+    return 'Workspace call';
+  };
 
   const CallTypeIcon = ({ type, className }: { type: CallType; className?: string }) => {
     if (type === 'AUDIO')
@@ -150,33 +180,36 @@ export default function CallsPage() {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-background overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-        <h1 className="text-xl font-bold text-foreground">Calls</h1>
-        <button
-          onClick={() => setShowStartCallDialog(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium"
-        >
-          <Plus className="w-4 h-4" />
-          Start Call
-        </button>
-      </div>
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <FloatingHeader
+        title="Calls"
+        subtitle="Voice huddles, video rooms, and recent conversations across your workspace."
+        sticky={false}
+        actions={
+          <button
+            onClick={() => setShowStartCallDialog(true)}
+            className="inline-flex items-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-medium text-white shadow-[0_10px_24px_rgba(26,86,219,0.16)] transition-all duration-150 hover:-translate-y-0.5 hover:bg-primary/90"
+          >
+            <Plus className="h-4 w-4" />
+            Start Call
+          </button>
+        }
+      />
 
-      <div className="flex-1 overflow-auto p-6 space-y-6">
-        {/* Active Calls Section */}
+      <div className="dsv-scroll flex-1 space-y-5 overflow-y-auto">
         {activeCalls.length > 0 && (
-          <div>
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-              Active Calls ({activeCalls.length})
-            </h2>
-            <div className="space-y-2">
+          <ScreenSection
+            eyebrow="Live now"
+            title={`Active calls${activeCalls.length > 1 ? ` (${activeCalls.length})` : ''}`}
+            description="Jump back into any live room with one click."
+          >
+            <div className="grid gap-4 lg:grid-cols-2">
               {activeCalls.map((call) => (
                 <div
                   key={call.id}
-                  className="flex items-center gap-4 p-4 bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800 rounded-xl"
+                  className="dsv-card dsv-card-hover flex items-center gap-4 p-5"
                 >
-                  <div className="w-10 h-10 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center text-green-600">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#0E9F6E]/12 text-[#0E9F6E]">
                     {call.type === 'AUDIO' ? (
                       <Phone className="w-5 h-5" />
                     ) : (
@@ -184,17 +217,17 @@ export default function CallsPage() {
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground">
-                      {call.channelName ?? 'Direct Call'}
+                    <p className="truncate text-base font-semibold text-foreground">
+                      {call.channelName ?? 'Direct call'}
                     </p>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="mt-1 text-sm text-muted-foreground">
                       {call.participantCount} participant
                       {call.participantCount !== 1 ? 's' : ''} · Started{' '}
                       {format(parseISO(call.startedAt), 'h:mm a')}
                     </p>
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="inline-flex items-center gap-1 text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-2 py-0.5 rounded-full">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-[#0E9F6E]/10 px-2.5 py-1 text-xs font-medium text-[#0E9F6E]">
                       <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
                       Live
                     </span>
@@ -202,7 +235,7 @@ export default function CallsPage() {
                       href={`/call/${call.id}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500 text-white text-sm font-medium rounded-lg hover:bg-green-600 transition-colors"
+                      className="inline-flex items-center gap-1.5 rounded-2xl border border-border bg-white px-3 py-2 text-sm font-medium text-foreground transition-colors hover:border-primary/20 hover:text-primary dark:bg-slate-950/50"
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
                       Join
@@ -211,14 +244,14 @@ export default function CallsPage() {
                 </div>
               ))}
             </div>
-          </div>
+          </ScreenSection>
         )}
 
-        {/* Call History */}
-        <div>
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-            Recent Calls
-          </h2>
+        <ScreenSection
+          eyebrow="History"
+          title="Recent calls"
+          description="A cleaner timeline of huddles, check-ins, and missed conversations."
+        >
 
           {isLoading ? (
             <div className="space-y-2">
@@ -227,13 +260,15 @@ export default function CallsPage() {
               ))}
             </div>
           ) : historyItems.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-              <div className="text-5xl mb-4">📞</div>
+            <div className="dsv-card flex flex-col items-center justify-center py-20 text-center text-muted-foreground">
+              <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#1A56DB]/10 text-primary">
+                <PhoneCall className="h-6 w-6" />
+              </div>
               <p className="font-medium">No calls yet</p>
-              <p className="text-sm mt-1">Start a call to connect with your team</p>
+              <p className="mt-1 text-sm">Start a call to connect with your team.</p>
             </div>
           ) : (
-            <div className="bg-card border border-border rounded-xl divide-y divide-border">
+            <div className="dsv-card overflow-hidden">
               {historyItems.map((call) => {
                 const direction = call.direction ?? 'OUTGOING';
                 const dirConfig = DIRECTION_CONFIG[direction];
@@ -246,41 +281,28 @@ export default function CallsPage() {
                       )
                     : 0
                 );
-                const callerName =
-                  call.channelName ??
-                  call.participants?.find((p) => p.id !== user?.id)?.name ??
-                  'Unknown';
-                const callerAvatar = call.participants?.find((p) => p.id !== user?.id)?.avatarUrl;
+                const otherParticipant = call.participants?.find((p) => p.id !== user?.id);
+                const callerName = getCallDisplayName(call);
+                const callerAvatar = otherParticipant?.avatarUrl;
 
                 return (
                   <div
                     key={call.id}
-                    className="flex items-center gap-4 px-4 py-3 hover:bg-muted/30 transition-colors"
+                    className="flex items-center gap-4 border-b border-border/70 px-5 py-4 transition-colors last:border-b-0 hover:bg-muted/25"
                   >
-                    {/* Avatar */}
-                    <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center flex-shrink-0 overflow-hidden">
-                      {callerAvatar ? (
-                        <img
-                          src={callerAvatar}
-                          alt={callerName}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <span className="text-sm font-medium text-muted-foreground">
-                          {callerName.charAt(0).toUpperCase()}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Info */}
+                    <PresenceAvatar
+                      name={callerName}
+                      src={callerAvatar}
+                      status={direction === 'MISSED' ? 'DND' : 'ONLINE'}
+                    />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <p className="text-sm font-medium text-foreground truncate">
+                        <p className="truncate text-sm font-semibold text-foreground">
                           {callerName}
                         </p>
                         <span
                           className={cn(
-                            'flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded-full flex-shrink-0',
+                            'flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium',
                             dirConfig.badgeClass
                           )}
                         >
@@ -288,7 +310,7 @@ export default function CallsPage() {
                           {dirConfig.label}
                         </span>
                       </div>
-                      <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
+                      <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
                         <CallTypeIcon type={call.type} />
                         <span>{call.type === 'AUDIO' ? 'Voice' : 'Video'} call</span>
                         <span>·</span>
@@ -296,28 +318,32 @@ export default function CallsPage() {
                       </div>
                     </div>
 
-                    {/* Date */}
-                    <div className="text-right flex-shrink-0">
-                      <p className="text-xs text-muted-foreground">
-                        {format(
-                          parseISO(
-                            call.startedAt instanceof Date
-                              ? call.startedAt.toISOString()
-                              : String(call.startedAt)
-                          ),
-                          'MMM d'
-                        )}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {format(
-                          parseISO(
-                            call.startedAt instanceof Date
-                              ? call.startedAt.toISOString()
-                              : String(call.startedAt)
-                          ),
-                          'h:mm a'
-                        )}
-                      </p>
+                    <div className="flex shrink-0 items-center gap-3">
+                      <button className="hidden rounded-full border border-border p-2 text-muted-foreground transition-colors hover:text-primary md:inline-flex">
+                        <ArrowUpRight className="h-4 w-4" />
+                      </button>
+                      <div className="text-right">
+                        <p className="text-xs text-muted-foreground">
+                          {format(
+                            parseISO(
+                              call.startedAt instanceof Date
+                                ? call.startedAt.toISOString()
+                                : String(call.startedAt)
+                            ),
+                            'MMM d'
+                          )}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {format(
+                            parseISO(
+                              call.startedAt instanceof Date
+                                ? call.startedAt.toISOString()
+                                : String(call.startedAt)
+                            ),
+                            'h:mm a'
+                          )}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 );
@@ -325,7 +351,6 @@ export default function CallsPage() {
             </div>
           )}
 
-          {/* Load More */}
           {hasNextPage && (
             <div className="mt-4 flex justify-center">
               <button
@@ -337,17 +362,16 @@ export default function CallsPage() {
               </button>
             </div>
           )}
-        </div>
+        </ScreenSection>
       </div>
 
-      {/* Start Call Dialog */}
       {showStartCallDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
-            className="absolute inset-0 bg-black/50"
+            className="absolute inset-0 bg-slate-950/30 backdrop-blur-sm"
             onClick={() => setShowStartCallDialog(false)}
           />
-          <div className="relative bg-card rounded-xl border border-border shadow-xl w-full max-w-md mx-4 p-6">
+          <div className="relative mx-4 w-full max-w-md rounded-[24px] border border-border bg-card p-6 shadow-[0_24px_60px_rgba(15,23,42,0.18)]">
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-lg font-semibold text-foreground">Start a Call</h2>
               <button
@@ -399,6 +423,47 @@ export default function CallsPage() {
                   }
                   className="w-full px-3 py-2 bg-background border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
                 />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Add one or many teammate emails separated by commas.
+                </p>
+                {selectableMembers.length > 0 ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {selectableMembers.slice(0, 8).map((member) => {
+                      const selectedEmails = callForm.emails
+                        .split(',')
+                        .map((email) => email.trim().toLowerCase())
+                        .filter(Boolean);
+                      const isSelected = selectedEmails.includes(member.email.toLowerCase());
+                      return (
+                        <button
+                          key={member.id}
+                          type="button"
+                          onClick={() => {
+                            const next = new Set(selectedEmails);
+                            if (isSelected) {
+                              next.delete(member.email.toLowerCase());
+                            } else {
+                              next.add(member.email.toLowerCase());
+                            }
+                            setCallForm((prev) => ({
+                              ...prev,
+                              channelId: '',
+                              emails: [...next].join(', '),
+                            }));
+                          }}
+                          className={cn(
+                            'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+                            isSelected
+                              ? 'border-primary/20 bg-primary/10 text-primary'
+                              : 'border-border bg-background text-muted-foreground hover:text-foreground'
+                          )}
+                        >
+                          <span>{member.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
               </div>
 
               {/* Audio / Video Toggle */}
@@ -472,6 +537,7 @@ export default function CallsPage() {
           </div>
         </div>
       )}
+      {activeCall ? <CallOverlay config={activeCall} onLeave={() => setActiveCall(null)} participants={[]} /> : null}
     </div>
   );
 }
